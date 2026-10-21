@@ -349,7 +349,8 @@ class Router:
         for patron in prov.get("patrones_extra", []):
             for i in sorted(ids, reverse=True):
                 if re.match(patron, i) and i not in {m["id"] for m in elegidos}:
-                    elegidos.insert(0, {"id": i, "vision": prov.get("vision_extra", False)})
+                    elegidos.insert(0, {"id": i, "vision": prov.get("vision_extra", False),
+                                        "rapido": any(re.match(p, i) for p in prov.get("rapido_extra", []))})
         if not elegidos and ids:
             # ninguno de los preferidos existe: elegimos los que parezcan modelos de chat
             malos = ("embed", "whisper", "tts", "guard", "image", "audio", "moderation", "rerank", "vision-only", "orpheus", "playai")
@@ -422,7 +423,8 @@ class Router:
             if self.estrategia == "calidad":
                 return base + random.random() * 0.1
             if self.estrategia == "velocidad":
-                return (r.latencia or 2.5) * 10 + base * 0.2 + len(r.recientes)
+                # los «rápidos» ganan por latencia pero responden peor: en la charla solo si no queda otro
+                return (r.latencia or 2.5) * 10 + base * 0.2 + len(r.recientes) + (25 if r.rapido and nivel != "rapido" else 0)
             # equilibrio: reparte la carga para que ninguna cuota se agote antes de tiempo
             return base + len(r.recientes) * 4 + r.fallos * 6 + random.random() * 2
 

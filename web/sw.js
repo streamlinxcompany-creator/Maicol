@@ -25,7 +25,7 @@ self.addEventListener("fetch", (e) => {
       })
       .catch(() => caches.match(e.request).then((r) => r || new Response(
         "<body style='background:#04090f;color:#00e5ff;font-family:sans-serif;display:grid;place-items:center;height:100vh;text-align:center'>" +
-        "<div><h2>J.A.R.V.I.S.</h2><p>Sin conexión con el cerebro.<br>¿Está encendido Tailscale?</p></div></body>",
+        "<div><h2>M.A.I.C.O.L.</h2><p>Sin conexión con el cerebro.<br>¿Está encendido Tailscale?</p></div></body>",
         { headers: { "Content-Type": "text/html; charset=utf-8" } })))
   );
 });

@@ -26,12 +26,13 @@ async def sintetizar(texto: str, voz: str | None = None, velocidad: str = "+0%")
     if not texto:
         return b""
     voz = voz or config.voz()
-    clave = hashlib.md5(f"{voz}|{velocidad}|{texto}".encode()).hexdigest()
+    tono = config.voz_tono()
+    clave = hashlib.md5(f"{voz}|{velocidad}|{tono}|{texto}".encode()).hexdigest()
     if clave in _cache:
         _cache.move_to_end(clave)
         return _cache[clave]
     audio = bytearray()
-    async for trozo in edge_tts.Communicate(texto, voz, rate=velocidad).stream():
+    async for trozo in edge_tts.Communicate(texto, voz, rate=velocidad, pitch=tono).stream():
         if trozo["type"] == "audio":
             audio.extend(trozo["data"])
     datos = bytes(audio)
@@ -45,6 +46,6 @@ async def voces() -> list[dict]:
     global _voces
     if _voces is None:
         todas = await edge_tts.list_voices()
-        _voces = sorted(({"id": v["ShortName"], "genero": v["Gender"], "region": v["Locale"]} for v in todas if v["Locale"].startswith("es-")),
+        _voces = sorted(({"id": v["ShortName"], "genero": v["Gender"], "region": v["Locale"]} for v in todas if v["Locale"].startswith("es-") or "Multilingual" in v["ShortName"]),
                         key=lambda v: v["id"])
     return _voces

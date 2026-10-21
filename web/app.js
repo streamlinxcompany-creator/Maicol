@@ -18,10 +18,33 @@ const ICONOS = {
 const guardado = (k, d) => { try { const v = localStorage.getItem("jarvis." + k); return v === null ? d : JSON.parse(v); } catch { return d; } };
 const guardar = (k, v) => { try { localStorage.setItem("jarvis." + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
 
+// panel lateral (scripts/maicol_lateral.pyw): solo orbe, respuesta y barra mínima
+const LATERAL = new URLSearchParams(location.search).has("lateral");
+if (LATERAL) {
+  document.body.classList.add("lateral");
+  document.title = "Maicol lateral";  // así el lanzador la distingue de la ventana grande
+  // Edge dibuja su propia barra de título en las apps: el lanzador la sube fuera de la vista si sabe cuánto mide
+  const contarMarco = () => {
+    const d = devicePixelRatio || 1;  // el lanzador trabaja en píxeles reales
+    const lados = Math.max(0, Math.round((outerWidth - innerWidth) / 2 * d));
+    const arriba = Math.max(0, Math.round((outerHeight - innerHeight) * d) - lados);
+    fetch("/api/lateral", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ arriba, lados, abajo: lados }) }).catch(() => {});
+  };
+  contarMarco();
+  addEventListener("resize", () => { clearTimeout(contarMarco.t); contarMarco.t = setTimeout(contarMarco, 300); });
+  if (new URLSearchParams(location.search).get("lado") === "izquierda") document.body.classList.add("lado-izquierda");
+  // cada vez que el panel sale del borde, el contenido entra con un desliz
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    document.body.classList.remove("entrando"); void document.body.offsetWidth; document.body.classList.add("entrando");
+    setTimeout(() => document.body.classList.remove("entrando"), 700);
+  });
+}
+
 const S = {
   ws: null, modo: "espera", info: null, ia: null,
   vozActiva: guardado("voz", true), sonidos: guardado("sonidos", true),
-  voz: guardado("vozId", null), velocidad: guardado("velocidad", 5),
+  voz: guardado("vozId", null), velocidad: guardado("velocidad", 20),
   generando: false, burbuja: null, textoActual: "", ptrVoz: 0, enCodigo: false,
   ultimoProveedor: null, adjuntos: [], confirmacion: null, provActual: null,
   hud: guardado("hud", false),
@@ -70,23 +93,76 @@ function limpiarParaVoz(t) {
     .replace(/https?:\/\/(www\.)?([^\/\s]+)\S*/g, "$2").replace(/[*_#>|~]/g, "").replace(/\s+/g, " ").trim();
 }
 
+// Edge trae las mismas voces neuronales de Microsoft: hablar con ellas empieza en ~0,1 s,
+// mientras que pedir el audio al núcleo (edge-tts) tarda de 1 a 9 s según el servidor de Microsoft
+function vozNavegador() {
+  if (!("speechSynthesis" in window)) return null;
+  const id = S.voz || (S.info && S.info.voz) || "";
+  const m = id.match(/^([a-z]{2}-[A-Z]{2})-(\w+?)Neural$/);
+  if (!m) return null;
+  const sinTildes = (s) => s.normalize("NFD").replace(/\p{M}/gu, "");
+  const nombre = "Microsoft " + m[2].replace("Multilingual", " Multilingual") + " ";
+  return speechSynthesis.getVoices().find((v) => v.lang === m[1] && sinTildes(v.name).startsWith(nombre)) || null;
+}
+
+// Edge carga la lista de voces en segundo plano: hasta que llega, se espera (máx. 1,5 s) para no
+// decir las primeras frases con el audio del núcleo y el resto con la voz de Edge
+const vocesListas = new Promise((ok) => {
+  if (!("speechSynthesis" in window) || speechSynthesis.getVoices().length) return ok();
+  speechSynthesis.addEventListener("voiceschanged", ok, { once: true });
+  setTimeout(ok, 1500);
+});
+
+function hablarNavegador(t, voz, volumen = 1) {
+  return new Promise((ok) => {
+    const u = new SpeechSynthesisUtterance(t);
+    u.voice = voz;
+    u.volume = volumen;
+    // con la voz elegida, su propio idioma: si se pide «es-ES» a una voz en-US, Edge a veces arranca la frase
+    // con su voz española por defecto (de mujer). Las Multilingual detectan solas que el texto es español
+    u.lang = voz ? voz.lang : "es-ES";
+    u.rate = Math.min(2, Math.max(0.5, 1 + S.velocidad / 100));
+    u.pitch = Math.min(2, Math.max(0, 1 + (parseFloat((S.info && S.info.voz_tono) || "0") || 0) / 60));
+    // la voz de Edge no pasa por el analizador de audio: el orbe late con cada palabra que dice
+    if (volumen) {
+      u.onstart = () => { vozNativa = true; pulsoVoz = 1; };
+      u.onboundary = () => { pulsoVoz = 1; };
+    }
+    u.onend = () => { if (volumen) vozNativa = false; ok(true); };
+    u.onerror = (e) => { if (volumen) vozNativa = false; ok(e.error === "interrupted" || e.error === "canceled"); };
+    speechSynthesis.speak(u);
+  });
+}
+
 function decir(texto) {
   const t = limpiarParaVoz(texto);
   if (!t || !S.vozActiva) return;
-  const params = new URLSearchParams({ texto: t, velocidad: (S.velocidad >= 0 ? "+" : "") + S.velocidad + "%" });
-  if (S.voz) params.set("voz_id", S.voz);
-  const promesa = fetch("/api/tts?" + params).then((r) => { if (!r.ok) throw new Error("tts"); return r.blob(); })
-    .then((b) => URL.createObjectURL(b)).catch(() => ({ respaldo: t }));
-  colaVoz.push(promesa);
+  colaVoz.push(vocesListas.then(() => (vozNavegador() ? { nativa: t } : audioNucleo(t))));
   revisarSilencio();  // pausa la música mientras se genera el audio, antes de que empiece a sonar
   if (!hablando) reproducirCola();
+}
+
+function audioNucleo(t) {
+  const params = new URLSearchParams({ texto: t, velocidad: (S.velocidad >= 0 ? "+" : "") + S.velocidad + "%" });
+  if (S.voz) params.set("voz_id", S.voz);
+  return fetch("/api/tts?" + params).then((r) => { if (!r.ok) throw new Error("tts"); return r.blob(); })
+    .then((b) => URL.createObjectURL(b)).catch(() => ({ respaldo: t }));
 }
 
 async function reproducirCola() {
   hablando = true;
   while (colaVoz.length) {
-    const item = await colaVoz.shift();
+    let item = await colaVoz.shift();
     if (!hablando) break;
+    if (item && item.nativa) {
+      // una frase a la vez: si la voz de Edge falla en una (p. ej. un corte de red), esa misma frase
+      // se pide al núcleo con la misma voz, sin adelantarse ni pisarse con la siguiente
+      poner("hablando");
+      const voz = vozNavegador();
+      // «synthesis-failed» suele ser pasajero (p. ej. justo tras cancelar): un reintento sale al instante
+      if (voz && ((await hablarNavegador(item.nativa, voz)) || !hablando || (await hablarNavegador(item.nativa, voz)) || !hablando)) continue;
+      item = await audioNucleo(item.nativa);
+    }
     poner("hablando");
     if (typeof item === "string") {
       reproductor.src = item;
@@ -96,7 +172,7 @@ async function reproducirCola() {
       } catch { /* autoplay bloqueado */ }
       URL.revokeObjectURL(item);
     } else if (item && item.respaldo && "speechSynthesis" in window) {
-      await new Promise((ok) => { const u = new SpeechSynthesisUtterance(item.respaldo); u.lang = "es-ES"; u.onend = ok; u.onerror = ok; speechSynthesis.speak(u); });
+      await hablarNavegador(item.respaldo, vozNavegador());  // último recurso: la voz de Edge si la hay, si no la de Windows
     }
   }
   hablando = false;
@@ -108,7 +184,8 @@ function callar() {
   colaVoz.length = 0;
   hablando = false;
   reproductor.pause();
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  // cancelar sin nada sonando hace fallar la siguiente frase en Edge («synthesis-failed»)
+  if ("speechSynthesis" in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
   if (S.modo === "hablando") poner("espera");
   revisarSilencio();
 }
@@ -184,7 +261,7 @@ function alimentarVoz(final = false) {
 const lienzo = $("#reactor"), g2 = lienzo.getContext("2d");
 const nodos = {};       // id proveedor -> {ang, estado}
 const rayos = [];       // efectos de rotación/selección
-let nivelSuave = 0, tiempo = 0;
+let nivelSuave = 0, tiempo = 0, vozNativa = false, pulsoVoz = 0;
 const ACENTOS = { espera: [0, 229, 255], escuchando: [61, 255, 168], pensando: [255, 181, 71], hablando: [0, 229, 255], error: [255, 77, 94], herramienta: [180, 140, 255] };
 let colorActual = [0, 229, 255];
 
@@ -200,7 +277,10 @@ function ajustarLienzo(c) {
 
 function nivelAudio() {
   let objetivo = 0;
-  if (analizador && hablando) {
+  if (vozNativa) {
+    pulsoVoz *= 0.9;
+    objetivo = 0.32 + 0.5 * pulsoVoz + 0.08 * Math.sin(tiempo * 17) + 0.05 * Math.sin(tiempo * 29);
+  } else if (analizador && hablando) {
     analizador.getByteFrequencyData(datosFreq);
     let s = 0; for (let i = 2; i < 60; i++) s += datosFreq[i];
     objetivo = Math.min(1, s / 58 / 160);
@@ -277,7 +357,8 @@ function dibujarReactor(dt) {
   for (let i = 0; i < barras; i++) {
     const a = (i / barras) * Math.PI * 2 - Math.PI / 2;
     let amp = 0.012;
-    if (analizador && hablando) amp += (datosFreq[(i % 48) + 2] / 255) * 0.09;
+    if (analizador && hablando && !vozNativa) amp += (datosFreq[(i % 48) + 2] / 255) * 0.09;
+    else if (vozNativa) amp += nivel * 0.07 * (0.55 + 0.45 * Math.sin(i * 1.3 + tiempo * 21) * Math.sin(i * 0.37 - tiempo * 9));
     else amp += nivel * 0.03 * (0.5 + 0.5 * Math.sin(i * 0.7 + tiempo * 5 * vel));
     const r0 = R * 0.6, r1 = r0 + R * amp;
     g2.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g2.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
@@ -440,6 +521,37 @@ function ponerMeta(d, m) {
   e.textContent = `${m.proveedor} · ${m.modelo} · ${m.segundos}s · ${m.tokens} tok`;
 }
 
+/* ---- lienzo visual: lo que Maicol dibuja con mostrar_visual ---- */
+const ANCHO_LIENZO_LATERAL = 640;  // en el panel lateral la ventana se ensancha esto hacia el centro de la pantalla
+const plantillaLienzo = fetch("/static/lienzo.css").then((r) => r.text()).catch(() => "");
+
+async function mostrarVisual(ev) {
+  if (ev.cerrar) return cerrarVisual();
+  const css = await plantillaLienzo;
+  $("#lienzo-titulo").textContent = ev.titulo || "";
+  // sin red ni acceso a la página: solo pinta lo que trae
+  $("#lienzo-marco").srcdoc = '<!doctype html><html lang="es"><head><meta charset="utf-8">' +
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:">` +
+    `<style>${css}</style></head><body>` +
+    '<svg width="0" height="0" style="position:absolute"><defs><marker id="flecha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00e5ff"/></marker></defs></svg>' +
+    `<main class="lienzo-contenido">${ev.html || ""}</main></body></html>`;
+  S.ultimoVisual = ev;
+  document.body.classList.add("con-lienzo");
+  $("#lienzo").setAttribute("aria-hidden", "false");
+  if (LATERAL) avisarLienzo(ANCHO_LIENZO_LATERAL);
+}
+
+function cerrarVisual() {
+  document.body.classList.remove("con-lienzo");
+  $("#lienzo").setAttribute("aria-hidden", "true");
+  if (LATERAL) avisarLienzo(0);
+}
+
+function avisarLienzo(ancho) {  // el lanzador del lateral ensancha o encoge la ventana
+  fetch("/api/lateral", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lienzo: Math.round(ancho * (devicePixelRatio || 1)) }) }).catch(() => {});
+}
+
 function chip(texto, clase = "") {
   const c = document.createElement("div");
   c.className = "chip " + clase; c.textContent = texto;
@@ -448,8 +560,16 @@ function chip(texto, clase = "") {
 }
 
 function subtitulo(texto, usuario = false) {
-  if (usuario) $("#entrada").placeholder = texto;
   const s = $("#subtitulo");
+  if (LATERAL) {
+    // en el panel lateral la respuesta se ve completa (con la pregunta encima) y baja sola mientras llega
+    if (usuario) S.pregunta = texto;
+    s.innerHTML = usuario ? `<span class="usuario">${escapar(texto)}</span>`
+      : (S.pregunta ? `<span class="pregunta">${escapar(S.pregunta)}</span>` : "") + escapar(limpiarParaVoz(texto));
+    s.scrollTop = s.scrollHeight;
+    return;
+  }
+  if (usuario) $("#entrada").placeholder = texto;
   s.innerHTML = usuario ? `<span class="usuario">${escapar(texto)}</span>` : escapar(limpiarParaVoz(texto)).slice(-260);
 }
 
@@ -545,6 +665,13 @@ function manejar(ev) {
       document.body.dataset.modo = ev.nombre || "";
       aviso("MODO", ev.nombre ? `Modo ${ev.nombre}${ev.tarea ? " · " + ev.tarea : ""} activado` : "Modo desactivado");
       return;
+    case "visual":
+      mostrarVisual(ev);
+      if (!ev.cerrar) {  // en el registro queda un acceso para volver a verlo
+        const c = chip("◈ " + (ev.titulo || "Visual") + " · ver", "visual");
+        c.onclick = () => mostrarVisual(ev);
+      }
+      return;
     case "anuncio":
       burbuja("assistant", ev.texto);
       subtitulo(ev.texto);
@@ -578,6 +705,9 @@ function enviar(texto, porVoz = false) {
   if (!texto) texto = "¿Qué ves en esta imagen?";
   iniciarAudio();
   callar();
+  // la voz «Online» de Edge tarda ~2 s en conectar la primera vez: se calienta mientras la IA piensa
+  const vozRapida = S.vozActiva && vozNavegador();
+  if (vozRapida) hablarNavegador("Mm.", vozRapida, 0);
   if (S.generando) enviarWS({ type: "detener" });
   burbuja("user", texto, null, S.adjuntos);
   subtitulo(texto, true);
@@ -604,7 +734,7 @@ function pedirConfirmacion(ev) {
   sonido.alerta();
   S.confirmacion = ev.id;
   const nombres = { ejecutar_comando: "ejecutar un comando en tu PC", escribir_archivo: "escribir un archivo", energia: "cambiar el estado de energía del PC", servidor_comando: "ejecutar un comando en tu servidor", crear_protocolo: "crear un protocolo" };
-  $("#modal-texto").textContent = `JARVIS solicita permiso para ${nombres[ev.nombre] || ev.nombre}.`;
+  $("#modal-texto").textContent = `Maicol solicita permiso para ${nombres[ev.nombre] || ev.nombre}.`;
   $("#modal-args").textContent = Object.entries(ev.args || {}).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v, null, 1)}`).join("\n");
   $("#modal").classList.remove("oculto");
   decir("Necesito tu autorización para continuar.");
@@ -620,7 +750,8 @@ function responderConfirmacion(ok) {
 
 /* ====================== reconocimiento de voz ====================== */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const PALABRA = /\b(jarvis|yarvis|charvis|jarbis|harvis|yarbis|jarvi|travis)\b[,.!]?\s*/i;
+// «Maicol» lo transcriben de muchas formas; «Jarvis» sigue sirviendo por costumbre
+const PALABRA = /\b(maicol|maikol|maykol|maicoll|michael|maicool|maico|mycol|maikel|jarvis|yarvis|jarbis)\b[,.!]?\s*/i;
 const escucha = {
   rec: null, activo: false, continua: guardado("continua", false), directo: false, esperandoComando: false, temporizador: null,
   grabador: null, trozos: [],
@@ -706,7 +837,7 @@ const escucha = {
     iniciarAudio();
     if (!SR) { aviso("VOZ", "Este navegador no soporta reconocimiento continuo. Usa Chrome o Edge."); return; }
     this.continua = !this.continua; guardar("continua", this.continua);
-    if (this.continua) { this.iniciar(); aviso("ESCUCHA ACTIVA", "Di «Jarvis» seguido de tu orden."); }
+    if (this.continua) { this.iniciar(); aviso("ESCUCHA ACTIVA", "Di «Maicol» seguido de tu orden."); }
     else if (!this.directo) this.parar();
     this.pintar();
   },
@@ -963,6 +1094,8 @@ async function arrancar() {
   if (new URLSearchParams(location.search).get("tecla")) {
     // abierta con la tecla rombo: arranca sola y se pone a escuchar
     setTimeout(() => { b.click(); setTimeout(() => escucha.alternarDirecto(), 900); }, 200);
+  } else if (new URLSearchParams(location.search).get("lateral")) {
+    setTimeout(() => b.click(), 200);  // panel lateral: es acceso rápido, arranca solo
   }
   b.onclick = () => {
     iniciarAudio();
@@ -970,8 +1103,9 @@ async function arrancar() {
     sonido.escuchar();
     const nombre = info.tratamiento || info.usuario;
     const soloRespaldo = provs.every((p) => p.sin_llave);
-    let saludo = `${info.saludo}${nombre ? ", " + nombre : ""}. Todos los sistemas en línea.`;
-    saludo += soloRespaldo ? " Estoy funcionando con el proveedor de emergencia. Agrega llaves gratuitas para darme más potencia." : ` Tengo ${provs.length} inteligencias artificiales listas para rotar.`;
+    const remates = ["Aquí estoy, ¿qué inventamos hoy?", "Volví. ¿Qué tenemos?", "Listo para lo que sea… dentro de lo legal.", "¿En qué lío nos metemos hoy?"];
+    let saludo = `${info.saludo}${nombre ? ", " + nombre : ""}. ${remates[Math.floor(Math.random() * remates.length)]}`;
+    if (soloRespaldo) saludo += " Eso sí, ando con el cerebro de emergencia: ponme llaves gratis en ajustes y me pongo serio.";
     subtitulo(saludo); decir(saludo);
     if (escucha.continua) escucha.iniciar();
   };
@@ -1125,9 +1259,9 @@ addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   invitacionInstalar = e;
   $("#btn-instalar").classList.remove("oculto");
-  if (/Android|iPhone/i.test(navigator.userAgent)) aviso("JARVIS", "Puedes instalarme como app: ⚙ → 📲 Instalar JARVIS como app.");
+  if (/Android|iPhone/i.test(navigator.userAgent)) aviso("MAICOL", "Puedes instalarme como app: ⚙ → 📲 Instalar Maicol como app.");
 });
-addEventListener("appinstalled", () => { $("#btn-instalar").classList.add("oculto"); aviso("JARVIS", "Instalado. Ya estoy en tu pantalla de inicio."); });
+addEventListener("appinstalled", () => { $("#btn-instalar").classList.add("oculto"); aviso("MAICOL", "Instalado. Ya estoy en tu pantalla de inicio."); });
 $("#btn-instalar").onclick = async () => {
   if (!invitacionInstalar) return;
   invitacionInstalar.prompt();
@@ -1141,3 +1275,7 @@ conectar();
 dibujarFondo();
 requestAnimationFrame(bucle);
 arrancar();
+
+$("#lienzo-cerrar").onclick = cerrarVisual;
+addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("con-lienzo")) cerrarVisual(); });
+if (LATERAL) avisarLienzo(0);  // al (re)cargar el panel, sin lienzo abierto

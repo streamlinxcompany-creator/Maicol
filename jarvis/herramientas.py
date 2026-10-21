@@ -103,14 +103,14 @@ def _corto(texto: str, maximo: int) -> str:
 
 
 # Mandar las 31 herramientas en cada petición cuesta ~2.400 tokens: se mandan solo las relevantes.
-NUCLEO = {"fecha_hora", "buscar_web", "calcular", "recordar", "buscar_memoria", "crear_recordatorio", "abrir", "estado_ia"}
+NUCLEO = {"fecha_hora", "buscar_web", "calcular", "recordar", "buscar_memoria", "crear_recordatorio", "abrir", "cerrar", "estado_ia"}
 GRUPOS = [
     ({"clima"}, ("clima", "tiempo hace", "llov", "lluvia", "temperatura", "calor", "frío", "frio", "pronóstico", "pronostico", "sol ")),
     ({"leer_web", "noticias", "wikipedia"}, ("noticia", "página", "pagina", "web", "http", "www", "wikipedia", "quién es", "quien es", "qué es", "que es", "lee ", "artículo", "articulo", "historia de")),
     ({"multimedia"}, ("volumen", "música", "musica", "canción", "cancion", "pausa", "siguiente", "anterior", "sube", "baja", "silencia", "reproduce")),
     ({"ver_pantalla", "portapapeles"}, ("pantalla", "mira", "ves ", "ves?", "qué ves", "copia", "pega", "portapapeles", "esto")),
     ({"estado_sistema", "energia"}, ("pc", "computador", "ordenador", "cpu", "ram", "batería", "bateria", "sistema", "apaga", "reinicia", "bloquea", "suspende", "lento", "memoria del")),
-    ({"listar_archivos", "leer_archivo", "escribir_archivo", "ejecutar_comando"}, ("archivo", "carpeta", "escritorio", "documento", "comando", "powershell", "script", "instala", "crea un", "guarda en")),
+    ({"listar_archivos", "leer_archivo", "escribir_archivo", "crear_carpeta", "ejecutar_comando"}, ("archivo", "carpeta", "bloc", "block", "nota", "txt", "escritorio", "documento", "comando", "powershell", "script", "instala", "crea un", "guarda en")),
     ({"olvidar", "listar_recordatorios", "cancelar_recordatorio"}, ("olvida", "recordatorio", "pendiente", "cancela", "borra")),
     ({"servidor_estado", "servidor_comando", "servidor_encender"}, ("servidor", "casaos", "server", "docker", "contenedor", "enciende")),
     ({"protocolos", "ejecutar_protocolo", "crear_protocolo"}, ("protocolo", "modo ", "macro", "rutina")),
@@ -120,6 +120,9 @@ GRUPOS = [
                                                                                            "script", "función", "funcion", "error en", "bug", "refactor", "revisa el proyecto", "investiga a fondo")),
     ({"activar_modo", "salir_modo", "modos", "crear_modo", "abrir_juego"}, ("modo", "jugar", "juego", "trabajar", "a trabajar", "noche", "steam", "partida")),
     ({"modelo_3d_abrir", "impresoras_3d", "impresion_3d_planear", "imprimir_3d", "estado_impresoras_3d", "controlar_impresion_3d"}, ("imprim", "impresora", "3d", "stl", "3mf", "bambu", "filamento", "ams", "lamina", "plato", "pieza", "relleno", "soporte", "pared", "pendiente", "pausa", "reanuda", "cancela", "cómo va", "como va", "progreso")),
+    ({"mostrar_visual", "ocultar_visual", "estado_sistema"}, ("muéstr", "muestr", "enséñ", "ensén", "explícame", "explicame", "explica", "cómo funciona",
+      "como funciona", "a fondo", "más a fondo", "mas a fondo", "diagrama", "gráfic", "grafic", "visual", "dibuj", "esquema", "lienzo",
+      "cómo está el", "como esta el", "cómo va el", "como va el", "estado del", "rendimiento", "compar", "panel", "en pantalla")),
     ({"buscar_archivos", "enviar_archivo", "archivos_recibidos", "guardar_en_pc"}, ("archivo", "documento", "pdf", "foto", "imagen", "video",
       "tráeme", "traeme", "mándame", "mandame", "pásame", "pasame", "envíame", "enviame", "descarga", "guárdalo", "guardalo", "guarda", "compart")),
     ({"como_abro"}, ("cómo abres", "como abres", "dónde abres", "donde abres", "cómo abro", "como abro", "recuerdas abrir")),
@@ -164,6 +167,55 @@ def esquemas(contexto: str | None = None, usadas: set | None = None) -> list:
 
 def es_peligrosa(nombre) -> bool:
     return todas().get(nombre, {}).get("peligrosa", False)
+
+
+# Lo que borra, sobrescribe, mata procesos, instala, descarga o toca el sistema: eso sí pide permiso.
+# Lo demás (consultar, abrir, listar, ver) se hace solo.
+COMANDO_DELICADO = re.compile(r"""(?ix)
+    \b(del|erase|rd|rmdir|rm|remove-item|ri|format|diskpart|cipher|takeown|icacls|attrib|
+       stop-process|spps|kill|taskkill|pkill|killall|shutdown|logoff|restart-computer|stop-computer|
+       reg\s+(add|delete|import|copy)|set-itemproperty|new-itemproperty|remove-itemproperty|
+       set-executionpolicy|bcdedit|sc(\.exe)?\s+(delete|stop|config|create)|stop-service|set-service|netsh|
+       uninstall\S*|winget|choco|scoop|msiexec|pip\d?\s+(un)?install|npm\s+(i|install|uninstall|rm)|install-\w+|
+       move-item|mv|move|rename-item|ren|rename|copy-item|cp|copy|xcopy|robocopy|
+       set-content|clear-content|out-file|add-content|          # crear carpetas (new-item, mkdir) no borra nada: va sin permiso
+       invoke-expression|iex|invoke-webrequest|iwr|curl|wget|start-bitstransfer|
+       git\s+(reset|clean|push|checkout|rebase)|mkfs|dd|chmod|chown|sudo|apt(-get)?|dnf|yum|systemctl|
+       docker\s+(rm|rmi|stop|kill|system|volume|compose\s+down)|truncate)\b
+    | >>?\s*(?!\$?null\b|nul\b)\S        # redirigir la salida a un archivo lo sobrescribe
+""")
+
+
+def _comando_delicado(a) -> bool:
+    return bool(COMANDO_DELICADO.search(str(a.get("comando", ""))))
+
+
+def _sobrescribe(a) -> bool:
+    try:
+        return Path(os.path.expandvars(os.path.expanduser(str(a.get("ruta", ""))))).exists()
+    except OSError:
+        return True
+
+
+PERMISO = {  # herramienta -> ¿esta llamada concreta necesita permiso?
+    "ejecutar_comando": _comando_delicado,
+    "servidor_comando": _comando_delicado,
+    "escribir_archivo": _sobrescribe,                                              # crear uno nuevo no; pisar uno que existe sí
+    "energia": lambda a: a.get("accion") in ("apagar", "reiniciar", "suspender"),  # bloquear o cancelar no
+    "controlar_impresion_3d": lambda a: a.get("accion") == "cancelar",             # pausar o reanudar no
+    "crear_protocolo": lambda a: False,
+    "crear_modo": lambda a: False,
+    "notion_crear_nota": lambda a: False,
+    # imprimir_3d y encargar_a_claude: siempre (gastan material o editan archivos)
+}
+
+
+def necesita_permiso(nombre, args) -> bool:
+    """Las herramientas marcadas peligrosas solo piden permiso cuando la acción concreta es pesada o borra algo."""
+    if not es_peligrosa(nombre):
+        return False
+    regla = PERMISO.get(nombre)
+    return regla(args or {}) if regla else True
 
 
 async def ejecutar(nombre: str, args: dict, ctx: Contexto) -> str:
@@ -474,6 +526,27 @@ def metricas() -> dict:
             "red_tx": red.bytes_sent, "red_rx": red.bytes_recv, "arranque": psutil.boot_time()}
 
 
+@herramienta("mostrar_visual", "Abre el lienzo visual (panel HUD pegado al chat) y dibuja ahí con HTML usando la plantilla: "
+             "estado del PC, cómo funciona algo, diagramas, pasos, comparaciones, datos.",
+             {"titulo": P("string", "Título corto del panel"),
+              "html": P("string", "Contenido HTML con las piezas de la plantilla (y SVG/script si hace falta)")}, ["titulo", "html"])
+async def mostrar_visual(ctx, titulo, html):
+    if len(html) > 80000:
+        return "El visual es demasiado grande; hazlo más simple."
+    if not ctx.difundir:
+        return "Aquí no hay pantalla donde mostrarlo."
+    await ctx.difundir({"type": "visual", "titulo": titulo[:80], "html": html})
+    return (f"Mostrando «{titulo}» en el lienzo. Si ya hablaste antes de dibujar, cierra con algo cortísimo "
+            "(«ahí se lo dejé en el panel») o nada nuevo; si no, di 1 o 2 frases con lo más importante. No leas el panel.")
+
+
+@herramienta("ocultar_visual", "Cierra el lienzo visual.")
+async def ocultar_visual(ctx):
+    if ctx.difundir:
+        await ctx.difundir({"type": "visual", "cerrar": True})
+    return "Lienzo cerrado."
+
+
 @herramienta("estado_sistema", "Estado del computador: CPU, RAM, disco, batería, temperatura y procesos que más consumen.")
 async def estado_sistema(ctx):
     m = metricas()
@@ -598,13 +671,68 @@ async def leer_archivo(ctx, ruta):
     return p.read_text(encoding="utf-8", errors="replace")[:8000]
 
 
-@herramienta("escribir_archivo", "Crea o sobrescribe un archivo de texto en el PC.",
+@herramienta("crear_carpeta", "Crea una carpeta (y las que falten en la ruta). Ej: escritorio/proyecto 1.",
+             {"ruta": P("string", "Ruta completa de la carpeta")}, ["ruta"])
+async def crear_carpeta(ctx, ruta):
+    p = Path(os.path.expandvars(os.path.expanduser(ruta)))
+    ya = p.is_dir()
+    p.mkdir(parents=True, exist_ok=True)
+    return f"{'Ya existía' if ya else 'Creada'} la carpeta {p}."
+
+
+@herramienta("escribir_archivo", "Crea o sobrescribe un archivo de texto (.txt = bloc de notas) en el PC; crea solo las carpetas que falten.",
              {"ruta": P("string", "Ruta del archivo"), "contenido": P("string", "Contenido completo")}, ["ruta", "contenido"], peligrosa=True)
 async def escribir_archivo(ctx, ruta, contenido):
     p = Path(os.path.expandvars(os.path.expanduser(ruta)))
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(contenido, encoding="utf-8")
     return f"Escrito {p} ({len(contenido)} caracteres)."
+
+
+@herramienta("cerrar", "Cierra un programa como si le dieran a la X (pide guardar si hace falta). Úsala siempre para cerrar apps "
+             "en vez de matar procesos con comandos. Nunca cierra a Maicol.",
+             {"programa": P("string", "Nombre del programa o de la ventana, ej: 'edge', 'spotify', 'excel'")}, ["programa"], solo_pc=True)
+async def cerrar(ctx, programa):
+    return await asyncio.to_thread(_cerrar_ventanas, programa)
+
+
+def _cerrar_ventanas(programa: str) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.windll.user32
+    buscado = re.sub(r"[^a-z0-9]", "", programa.lower().replace("microsoft", ""))
+    propias = {"maicol", "maicollateral"}
+    cerradas, nombres = 0, set()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def una(h, _):
+        nonlocal cerradas
+        if not u.IsWindowVisible(h) or u.GetWindow(h, 4) or not u.GetWindowTextLengthW(h):  # solo ventanas principales
+            return True
+        b = ctypes.create_unicode_buffer(300)
+        u.GetWindowTextW(h, b, 300)
+        titulo = re.sub(r"[^a-z0-9]", "", b.value.lower())
+        if titulo in propias:
+            return True
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        try:
+            proc = psutil.Process(pid.value).name().lower().removesuffix(".exe")
+        except psutil.Error:
+            return True
+        if proc in ("python", "pythonw", "explorer"):
+            return True
+        if buscado and (buscado in re.sub(r"[^a-z0-9]", "", proc) or buscado in titulo):
+            u.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE: igual que la X
+            cerradas += 1
+            nombres.add(proc)
+        return True
+
+    u.EnumWindows(una, 0)
+    if not cerradas:
+        return f"No encontré ninguna ventana abierta de «{programa}»."
+    return f"Cerré {cerradas} ventana(s) de {', '.join(sorted(nombres))}."
 
 
 @herramienta("energia", "Bloquear, suspender, apagar o reiniciar el PC (apagar/reiniciar esperan 60 s; 'cancelar' lo detiene).",

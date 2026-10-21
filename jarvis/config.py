@@ -50,5 +50,9 @@ def voz() -> str:
     return env("VOZ", "es-CO-GonzaloNeural")
 
 
+def voz_tono() -> str:
+    return env("VOZ_TONO", "+0Hz")
+
+
 def estrategia() -> str:
     return env("ESTRATEGIA", "equilibrio")

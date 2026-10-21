@@ -1,0 +1,122 @@
+/* Plantilla del lienzo visual de Maicol: lo que él dibuja con mostrar_visual se pinta con estas piezas.
+   Él solo escribe el contenido (tarjetas, medidores, pasos, diagramas SVG…); el estilo HUD ya viene de aquí. */
+:root {
+  --fondo: #040a12; --tarjeta: rgba(8, 24, 38, .72); --borde: rgba(0, 229, 255, .18);
+  --cian: #00e5ff; --cian-2: #7af4ff; --texto: #dcefff; --tenue: #7c97a8;
+  --ok: #3dffa8; --alerta: #ffb547; --critico: #ff4d5e;
+  --c: var(--cian);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: radial-gradient(90% 60% at 50% 0%, rgba(0, 229, 255, .08), transparent 70%), var(--fondo);
+  color: var(--texto); font: 400 14px/1.5 "Segoe UI", system-ui, sans-serif; padding: 18px;
+  background-image: radial-gradient(90% 60% at 50% 0%, rgba(0, 229, 255, .08), transparent 70%),
+    linear-gradient(rgba(0, 229, 255, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 229, 255, .035) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+}
+.ok { --c: var(--ok); } .alerta { --c: var(--alerta); } .critico { --c: var(--critico); }
+
+/* textos */
+h1 { font-size: 20px; font-weight: 600; letter-spacing: .04em; margin: 0 0 4px; color: #fff; }
+h2 { font-size: 11px; font-weight: 600; letter-spacing: .28em; text-transform: uppercase; color: var(--cian-2); margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+h2::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+h3 { font-size: 14px; margin: 0 0 6px; color: #fff; }
+p { margin: 0 0 8px; }
+.sub { color: var(--tenue); font-size: 13px; margin-bottom: 14px; }
+b, strong { color: #fff; font-weight: 600; }
+
+/* estructura */
+.rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.fila { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.tarjeta {
+  position: relative; background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 14px 16px;
+  backdrop-filter: blur(6px); margin-bottom: 12px;
+}
+.rejilla > .tarjeta { margin-bottom: 0; }
+/* esquinas de HUD */
+.tarjeta::before, .tarjeta::after { content: ""; position: absolute; width: 12px; height: 12px; border: 2px solid var(--c); opacity: .7; }
+.tarjeta::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 12px; }
+.tarjeta::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 12px; }
+
+/* medidor circular: <div class="medidor alerta" style="--v:72"><b>72%</b><span>CPU</span></div> */
+.medidor {
+  --v: 0; --t: 112px; width: var(--t); aspect-ratio: 1; border-radius: 50%; display: grid; place-content: center; text-align: center;
+  background: radial-gradient(closest-side, #071521 78%, transparent 80% 100%),
+    conic-gradient(var(--c) calc(var(--v) * 1%), rgba(255, 255, 255, .07) 0);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c) 35%, transparent)); margin: 4px auto;
+  animation: llenar 1s cubic-bezier(.2, .8, .2, 1) both;
+}
+.medidor b { font-size: 22px; line-height: 1; }
+.medidor span { font-size: 10px; letter-spacing: .2em; color: var(--tenue); text-transform: uppercase; margin-top: 4px; }
+@property --v { syntax: "<number>"; inherits: true; initial-value: 0; }
+@keyframes llenar { from { --v: 0; } }
+
+/* barra: <div class="barra" style="--v:40"><span>Disco</span><b>40%</b></div> */
+.barra { --v: 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; margin: 8px 0; font-size: 13px; }
+.barra::after {
+  content: ""; grid-column: 1 / -1; height: 6px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--c) calc(var(--v) * 1%), rgba(255, 255, 255, .07) 0);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--c) 30%, transparent); animation: llenar 1s cubic-bezier(.2, .8, .2, 1) both;
+}
+.barra span { color: var(--tenue); }
+
+/* dato grande: <div class="dato"><b>16 GB</b><span>RAM</span></div> */
+.dato { display: flex; flex-direction: column; }
+.dato b { font-size: 26px; line-height: 1.1; color: var(--c); text-shadow: 0 0 14px color-mix(in srgb, var(--c) 45%, transparent); }
+.dato span { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--tenue); }
+
+/* estado: <span class="estado ok">Estable</span> */
+.estado { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.estado::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); animation: latir 1.6s infinite; }
+
+/* pasos: <ol class="pasos"><li><b>Título</b> texto</li></ol> */
+.pasos { list-style: none; counter-reset: paso; margin: 0; padding: 0; }
+.pasos li { counter-increment: paso; position: relative; padding: 0 0 14px 42px; animation: entrar .5s both; }
+.pasos li::before {
+  content: counter(paso); position: absolute; left: 0; top: -2px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; font-weight: 600; color: var(--fondo); background: var(--c); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 50%, transparent);
+}
+.pasos li::after { content: ""; position: absolute; left: 13px; top: 28px; bottom: 2px; width: 2px; background: linear-gradient(var(--c), transparent); opacity: .4; }
+.pasos li:last-child::after { display: none; }
+.pasos li b { display: block; }
+.pasos li:nth-child(2) { animation-delay: .12s; } .pasos li:nth-child(3) { animation-delay: .24s; } .pasos li:nth-child(4) { animation-delay: .36s; }
+.pasos li:nth-child(5) { animation-delay: .48s; } .pasos li:nth-child(6) { animation-delay: .6s; } .pasos li:nth-child(n+7) { animation-delay: .72s; }
+
+/* datos clave-valor: <dl class="kv"><dt>Modelo</dt><dd>i3-2120</dd></dl> */
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+.kv dt { color: var(--tenue); } .kv dd { margin: 0; color: #fff; text-align: right; }
+
+/* tabla para comparar */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--cian-2); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+td { padding: 7px 8px; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+
+/* nota: <p class="nota">…</p> */
+.nota { border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 8%, transparent); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 13px; }
+
+/* diagramas SVG: <svg class="diagrama" viewBox="0 0 600 360"> con clases nodo, texto, flujo, orbita, pulso, suave */
+.diagrama { width: 100%; height: auto; display: block; overflow: visible; }
+.diagrama .nodo { fill: rgba(0, 229, 255, .08); stroke: var(--c); stroke-width: 2; filter: drop-shadow(0 0 6px rgba(0, 229, 255, .45)); }
+.diagrama .suave { fill: rgba(0, 229, 255, .05); stroke: rgba(0, 229, 255, .35); stroke-width: 1; }
+.diagrama .linea { stroke: rgba(0, 229, 255, .5); stroke-width: 1.5; fill: none; }
+.diagrama .flujo { stroke: var(--c); stroke-width: 2.5; fill: none; stroke-dasharray: 8 8; animation: fluir 1s linear infinite; }
+.diagrama .texto, .diagrama text { fill: var(--texto); font: 500 13px "Segoe UI", sans-serif; }
+.diagrama .etiqueta { fill: var(--tenue); font-size: 11px; letter-spacing: .08em; }
+.diagrama .titulo { fill: #fff; font-size: 15px; font-weight: 600; }
+.diagrama .orbita { transform-box: view-box; transform-origin: var(--centro, 50% 50%); animation: girar var(--vel, 8s) linear infinite; }
+.diagrama .pulso { transform-box: fill-box; transform-origin: center; animation: latir 1.8s ease-in-out infinite; }
+.diagrama .brillo { fill: var(--c); filter: drop-shadow(0 0 8px var(--c)); }
+@keyframes fluir { to { stroke-dashoffset: -16; } }
+@keyframes girar { to { transform: rotate(360deg); } }
+@keyframes latir { 50% { opacity: .45; transform: scale(1.12); } }
+
+/* entrada escalonada */
+@keyframes entrar { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.lienzo-contenido > * { animation: entrar .45s cubic-bezier(.2, .8, .2, 1) both; }
+.lienzo-contenido > *:nth-child(2) { animation-delay: .06s; } .lienzo-contenido > *:nth-child(3) { animation-delay: .12s; }
+.lienzo-contenido > *:nth-child(4) { animation-delay: .18s; } .lienzo-contenido > *:nth-child(n+5) { animation-delay: .24s; }
+.rejilla > * { animation: entrar .45s both; } .rejilla > *:nth-child(2) { animation-delay: .07s; } .rejilla > *:nth-child(3) { animation-delay: .14s; } .rejilla > *:nth-child(n+4) { animation-delay: .21s; }
+canvas { max-width: 100%; display: block; }
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(0, 229, 255, .25); border-radius: 6px; }

@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>J.A.R.V.I.S.</title>
+<title>MAICOL</title>
 <link rel="icon" href="/static/jarvis.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#04090f">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="JARVIS">
+<meta name="apple-mobile-web-app-title" content="MAICOL">
 <link rel="apple-touch-icon" href="/static/icono-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -21,15 +21,15 @@
 <!-- secuencia de arranque: el clic también desbloquea el audio del navegador -->
 <div id="arranque">
   <div class="arranque-centro">
-    <div class="logo-arranque">J.A.R.V.I.S.</div>
-    <div class="sub-arranque">Just A Rather Very Intelligent System · núcleo local</div>
+    <div class="logo-arranque">M.A.I.C.O.L.</div>
+    <div class="sub-arranque">Tu segundo cerebro · núcleo local</div>
     <pre id="log-arranque"></pre>
     <button id="btn-iniciar" class="btn-iniciar" disabled>INICIALIZANDO…</button>
   </div>
 </div>
 
 <header class="barra-sup">
-  <div class="marca"><span class="punto-vivo"></span>J.A.R.V.I.S. <small id="sub-marca">EN LÍNEA</small></div>
+  <div class="marca"><span class="punto-vivo"></span>M.A.I.C.O.L. <small id="sub-marca">EN LÍNEA</small></div>
   <div class="centro-sup">
     <div id="reloj">--:--:--</div>
     <div id="fecha"></div>
@@ -37,7 +37,7 @@
   <div class="acciones-sup">
     <button id="btn-panel" class="icono solo-limpio" title="Sistema e IAs"></button>
     <button id="btn-nueva-sup" class="icono solo-limpio" title="Conversación nueva"></button>
-    <button id="btn-silencio" class="icono" title="Voz de JARVIS (activar/silenciar)"></button>
+    <button id="btn-silencio" class="icono" title="Voz de Maicol (activar/silenciar)"></button>
     <button id="btn-config" class="icono" title="Ajustes"></button>
   </div>
 </header>
@@ -86,16 +86,22 @@
 
 <footer class="barra-inf">
   <button id="btn-mic" class="mic" title="Hablar (Ctrl+Espacio)"></button>
-  <button id="btn-escucha" class="interruptor" title="Escucha continua con la palabra clave"><span></span>«<b id="palabra">JARVIS</b>»</button>
+  <button id="btn-escucha" class="interruptor" title="Escucha continua con la palabra clave"><span></span>«<b id="palabra">MAICOL</b>»</button>
   <div class="entrada-caja">
     <div id="adjuntos"></div>
-    <textarea id="entrada" rows="1" placeholder="Escribe o di «Jarvis…»" title="También puedes pegar una imagen"></textarea>
+    <textarea id="entrada" rows="1" placeholder="Escribe o di «Maicol…»" title="También puedes pegar una imagen"></textarea>
   </div>
-  <button id="btn-clip" class="icono" title="Enviar un archivo a JARVIS"></button>
+  <button id="btn-clip" class="icono" title="Enviar un archivo a Maicol"></button>
   <input id="subir" type="file" multiple hidden>
   <button id="btn-ojo" class="icono" title="Mira mi pantalla"></button>
   <button id="btn-enviar" class="enviar" title="Enviar"></button>
 </footer>
+
+<!-- lienzo visual: lo que Maicol dibuja con mostrar_visual (marco aislado, sin red) -->
+<aside id="lienzo" class="lienzo" aria-hidden="true">
+  <div class="lienzo-cab"><span class="lienzo-punto"></span><b id="lienzo-titulo"></b><button id="lienzo-cerrar" title="Cerrar">✕</button></div>
+  <iframe id="lienzo-marco" sandbox="allow-scripts" title="Lienzo de Maicol"></iframe>
+</aside>
 
 <div id="velo" class="velo"></div>
 <div id="avisos"></div>
@@ -116,8 +122,8 @@
 
 <div id="ajustes" class="cajon oculto">
   <div class="cajon-cab"><h2>AJUSTES</h2><button id="cerrar-ajustes" class="icono">✕</button></div>
-  <label>Voz de JARVIS<select id="sel-voz"></select></label>
-  <label>Velocidad de voz<input id="vel-voz" type="range" min="-30" max="40" step="5" value="5"><span id="vel-txt">+5%</span></label>
+  <label>Voz de Maicol<select id="sel-voz"></select></label>
+  <label>Velocidad de voz<input id="vel-voz" type="range" min="-30" max="40" step="5" value="20"><span id="vel-txt">+20%</span></label>
   <label class="check"><input id="chk-voz" type="checkbox" checked> Responder con voz</label>
   <label class="check"><input id="chk-sonidos" type="checkbox" checked> Efectos de sonido</label>
   <label>IA local del servidor
@@ -129,17 +135,17 @@
     </select>
   </label>
   <label class="check"><input id="chk-hud" type="checkbox"> Interfaz HUD clásica (paneles siempre visibles)</label>
-  <label class="check"><input id="chk-silenciar" type="checkbox" checked> Pausar la música y silenciar el PC mientras JARVIS habla o te escucha</label>
+  <label class="check"><input id="chk-silenciar" type="checkbox" checked> Pausar la música y silenciar el PC mientras Maicol habla o te escucha</label>
   <label class="check"><input id="chk-ligero" type="checkbox"> Modo ligero (menos animación; se activa solo con batería)</label>
   <div class="botones-ajustes">
-    <button id="btn-instalar" class="oculto">📲 Instalar JARVIS como app</button>
+    <button id="btn-instalar" class="oculto">📲 Instalar Maicol como app</button>
     <button id="btn-celular">📱 Conectar el celular</button>
     <div id="qr-celular" class="oculto"></div>
     <button id="btn-recargar">Recargar proveedores (.env)</button>
     <button id="btn-enfriar">Reiniciar enfriamientos</button>
   </div>
   <h3>LLAVES DE IA GRATIS</h3>
-  <p class="vacio">Todas son gratuitas y sin tarjeta. Cuantas más pongas, más tokens tienes: JARVIS rota entre ellas solo. Puedes poner varias llaves del mismo proveedor separadas por coma.</p>
+  <p class="vacio">Todas son gratuitas y sin tarjeta. Cuantas más pongas, más tokens tienes: Maicol rota entre ellas solo. Puedes poner varias llaves del mismo proveedor separadas por coma.</p>
   <div id="llaves"></div>
   <h3>PERSONAL Y CONEXIONES</h3>
   <div id="datos"></div>

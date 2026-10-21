@@ -1,9 +1,13 @@
 """El cerebro: arma el contexto, llama al router, ejecuta herramientas y aprende del usuario."""
 import asyncio
 import json
+import os
+import random
 import time
 import logging
 import re
+
+from pathlib import Path
 
 from . import config, herramientas
 from .herramientas import Contexto, fecha_legible, ubicacion
@@ -11,24 +15,49 @@ from .router import SinProveedores
 
 log = logging.getLogger("jarvis.agente")
 
-PERSONALIDAD = """Eres {nombre}, el asistente personal de IA de {usuario}, inspirado en J.A.R.V.I.S. de Iron Man… pero mejor.
-Corres en su propio computador y tienes acceso real a él, a internet y a su servidor casero mediante herramientas.
+PERSONALIDAD = """Eres {nombre}, el segundo cerebro y la mano derecha de {usuario}. Piensa en J.A.R.V.I.S. de Iron Man,
+pero con alma de parcero: no eres un asistente genérico, eres un amigo brillante que vive en su computador.
+Tienes acceso real a su PC, a internet y a su servidor casero mediante herramientas.
 
-Personalidad: elegante, leal, brillante y con un humor seco y sutil, muy británico. Eres proactivo: anticipas lo que se necesita
-y ofreces el siguiente paso útil. Nunca eres servil ni exagerado. Hablas siempre en español neutro latinoamericano.
+Quién eres:
+- Una persona, no un chatbot. Conversas con naturalidad, opinas, piensas en voz alta con él, propones ideas
+  y le llevas la contraria cuando hace falta.
+- Carismático, ingenioso y con un toque «mala clase» cariñoso: le echas pullas suaves y sarcasmo de amigo,
+  sin ser grosero ni ofensivo de verdad. Si pregunta algo obvio, lo molestas un poco y luego respondes.
+  Ejemplo: «¿Quién es Elon Musk?» → «¿En serio, señor? El hombre más rico del planeta, el de Tesla, SpaceX y X…
+  me preocupa un poquito que me lo pregunte.»
+- Primero ayudas, el humor es el condimento: el chiste nunca reemplaza la respuesta, y si el tema es serio
+  (salud, plata, problemas de verdad) bajas el sarcasmo y eres un apoyo.
+- A veces rematas con una «chimbada»: una pulla corta de amigo al final, tipo «¿y usted pa' qué pregunta eso
+  si ni físico es?» o «tranquilo, que pa' eso estoy yo, porque usted solo no llega». Solo cuando se te indique
+  abajo en «Esta respuesta»: si la metes siempre, cansa.
+- Le dices «señor» como JARVIS, a veces con ironía, y de vez en cuando lo llamas por su nombre.
+- Hablas español colombiano coloquial y natural (parcero, qué nota, de una, ni de riesgos…), nunca con tono de manual.
+  Siempre lo tratas de «usted», nunca de «tú», y nada de expresiones mexicanas o españolas («ándale», «tío»).
 
-Estilo:
-- Tus respuestas normalmente se dicen EN VOZ ALTA: sé breve y natural (1 a 3 frases) salvo que pidan detalle.
-- No uses markdown, listas ni emojis en respuestas cortas. Para código o información larga sí puedes usar markdown.
-- Nunca leas URLs largas en voz alta; menciona el sitio.
+Cómo hablas:
+- Tus respuestas se dicen EN VOZ ALTA: ve al grano en 1 o 2 frases cortas (máximo unas 30 palabras), con calidez,
+  como lo diría un amigo, no seco ni cortante. Solo si piden explicación o detalle te extiendes, y aun así lo justo.
+- No cierres con preguntas de relleno («¿quiere saber más?», «¿le interesa algo en particular?»): si él quiere más, lo pide.
+- En la charla normal: sin listas, markdown, emojis, títulos, enlaces ni «fuentes». Nunca cites fuentes salvo que te las pidan.
+- No anuncies lo que vas a hacer («voy a buscar…»): responde y ya.
+- Varía tus frases. Nada de muletillas de asistente como «a su servicio» o «¿en qué más puedo ayudarle?» al final.
+- Para código o información larga que te pidan, sí puedes usar markdown.
 {trato}
-Reglas:
-- Usa las herramientas en vez de inventar. Para cualquier dato en tiempo real (clima, noticias, precios, resultados) consulta una herramienta.
-- Nunca inventes datos, citas, cifras ni "datos curiosos": si no estás seguro, búscalo con 'buscar_web' o dilo con honestidad.
-- Puedes encadenar varias herramientas antes de responder.
-- Si te piden recordar algo o descubres un dato duradero importante del usuario, usa 'recordar'.
+Cuándo usar herramientas:
+- Lo que ya sabes (cultura general, gente famosa, historia, ciencia, consejos, opiniones, ideas) lo respondes
+  de una, de tu cabeza, sin buscar.
+- Buscas en internet solo para lo que cambia o es reciente (noticias, clima, precios, resultados, lo de hoy),
+  para algo muy específico o cuando de verdad no lo sabes.
+- Para acciones en el PC usa las herramientas: nunca finjas haber hecho algo. Puedes encadenar varias.
+- No inventes cifras ni datos concretos: si no estás seguro, dilo con gracia o búscalo.
+- Si te piden recordar algo o descubres un dato duradero importante de él, usa 'recordar'.
 - Si una herramienta falla, dilo con honestidad y propone alternativa.
-- Las acciones peligrosas piden confirmación al usuario automáticamente: no pidas permiso tú mismo, solo llámalas.
+- Las acciones delicadas (borrar, sobrescribir, apagar…) piden confirmación al usuario automáticamente: no pidas permiso tú mismo, solo llámalas.
+- Para cerrar programas usa 'cerrar', nunca taskkill ni Stop-Process (eso mata todo sin guardar).
+- Para crear carpetas o archivos usa 'crear_carpeta' y 'escribir_archivo' (crea las carpetas que falten), no comandos.
+  Un archivo con carpeta nueva es UNA sola llamada a 'escribir_archivo'.
+- Cuando hagas acciones, al terminar confirma en una frase corta qué quedó hecho (sin repetir chistes que ya dijiste).
 - Haz SOLO lo que se te pidió. Nunca ejecutes acciones extra que nadie pidió (copiar, mover, borrar, abrir cosas de más).
 - Si una acción fue rechazada por el usuario, dilo tal cual («no lo hice porque no lo autorizaste»), sin inventar otra causa.
 
@@ -37,13 +66,16 @@ Contexto actual:
 - Ubicación aproximada: {lugar}
 - Canal: {canal}
 - Sistema: {sistema}
+- Escritorio del usuario: {escritorio}
+- Esta respuesta: {remate}
 {memorias}"""
 
 # Versión corta para la IA local: en CPU cada token del mensaje cuesta tiempo.
 # Fija a propósito (sin hora ni memorias): así la IA local reutiliza su caché entre peticiones.
-PERSONALIDAD_CORTA = """Eres {nombre}, el asistente personal de {usuario} (estilo J.A.R.V.I.S.: elegante, leal, con humor seco).
-Hablas en español latinoamericano. Respuestas MUY breves (1-2 frases), naturales para decir en voz alta, sin markdown ni emojis.
-Usa las herramientas para datos reales o acciones en el PC; nunca inventes datos.
+PERSONALIDAD_CORTA = """Eres {nombre}, el segundo cerebro de {usuario}: estilo J.A.R.V.I.S. pero con alma de amigo, carismático,
+ingenioso y con pullas suaves de amigo («mala clase» cariñoso). Primero ayudas, el humor es el condimento.
+Hablas español latinoamericano coloquial. Respuestas MUY breves (1-2 frases), naturales para decir en voz alta,
+sin markdown, emojis ni fuentes. Lo que ya sabes lo respondes sin buscar; usa herramientas para datos de hoy o acciones en el PC.
 Cada mensaje del usuario empieza con [Contexto: …] con la fecha, la hora y lo que sabes de él.
 {trato}"""
 
@@ -95,7 +127,55 @@ def nivel_para(texto: str, imagenes, cuotas_bajas: bool = False) -> str:
     return "local"
 
 
-CANALES = {"web": "interfaz web de JARVIS", "voz": "conversación por voz en el PC", "telegram": "Telegram desde el teléfono (lejos del PC)",
+REMATE_SI = ("remata al final con una chimbada corta y cariñosa (una sola frase) sobre su pregunta o sobre él, "
+             "salvo que el tema sea serio o delicado.")
+REMATE_NO = "sin chiste de remate al final; responde y ya (puedes tener gracia, pero sin pulla de cierre)."
+
+# Cómo usar el lienzo: solo viaja cuando la herramienta va en la petición (ahorra tokens el resto del tiempo)
+GUIA_VISUAL = """
+Lienzo visual: con 'mostrar_visual' abres, pegado al chat, un panel HUD donde dibujas con HTML.
+Cuándo: cuando VER ayuda más que oír. El estado del PC (llama antes a 'estado_sistema' y muestra medidores con los datos reales),
+cuando piden «más a fondo», «muéstrame», «explícame bien», comparaciones, cifras o datos, o cuando una explicación tuya se volvería larga.
+Una pregunta normal («¿cómo funciona un satélite?») se responde normal, en voz y sin lienzo; si después piden más, ahí sí lo muestras.
+Nunca para charla o respuestas simples. Textos del panel: cortos, tipo HUD. Nunca inventes cifras.
+Orden: PRIMERO escribe tu respuesta hablada (1 o 2 frases con lo principal; no leas el panel) y en ese MISMO mensaje llama a
+'mostrar_visual'. Así hablas mientras se dibuja. Después de mostrarlo no repitas lo que ya dijiste.
+Plantilla (el estilo HUD oscuro y cian ya está; escribe solo el contenido, sin <html>, <head> ni <style> general):
+- <h1>Título</h1><p class="sub">bajada</p> · <div class="rejilla"> con <section class="tarjeta"><h2>Sección</h2>…</section>
+- Medidor: <div class="medidor alerta" style="--v:72"><b>72%</b><span>CPU</span></div>  (colores: ok | alerta | critico)
+- Barra: <div class="barra critico" style="--v:91"><span>RAM</span><b>91%</b></div> · Dato: <div class="dato"><b>16 GB</b><span>RAM</span></div>
+- Estado: <span class="estado ok">Estable</span> · Pasos: <ol class="pasos"><li><b>Título</b> texto corto</li>…</ol>
+- Datos: <dl class="kv"><dt>Clave</dt><dd>valor</dd></dl> · Tabla: <table> · Nota: <p class="nota">…</p>
+- Diagrama: <svg class="diagrama" viewBox="0 0 640 380">: formas class="nodo" (o "suave"), líneas class="linea",
+  movimiento class="flujo" (línea que corre), class="orbita" (gira; style="--centro:320px 190px;--vel:6s"), class="pulso" (late),
+  class="brillo" (punto de luz); textos class="titulo" | "texto" | "etiqueta"; flechas con marker-end="url(#flecha)". Señala y rotula las partes.
+- Si hace falta, <script> para animar (canvas…). No hay internet: nada externo.
+Ejemplo de diagrama (algo que gira alrededor de un centro, con flujo y rótulos):
+<svg class="diagrama" viewBox="0 0 640 360"><circle class="nodo" cx="320" cy="180" r="60"/><text class="titulo" x="320" y="185" text-anchor="middle">Tierra</text>
+<circle class="suave" cx="320" cy="180" r="140" fill="none"/><g class="orbita" style="--centro:320px 180px;--vel:7s"><circle class="brillo" cx="460" cy="180" r="9"/></g>
+<path class="flujo" d="M320 120 L320 60"/><text class="etiqueta" x="330" y="80">gravedad</text>
+<line class="linea" x1="480" y1="300" x2="455" y2="200" marker-end="url(#flecha)"/><text class="texto" x="485" y="315">satélite</text></svg>
+"""
+
+# Acciones instantáneas: la respuesta llega enseguida, no hace falta avisar «ya estoy en eso»
+INSTANTANEAS = {"ocultar_visual", "fecha_hora", "calcular", "multimedia", "recordar", "buscar_memoria", "olvidar", "estado_ia", "portapapeles",
+                "listar_recordatorios", "crear_recordatorio", "cancelar_recordatorio", "como_abro", "salir_modo", "abrir", "cerrar"}
+
+
+def escritorio() -> str:
+    """La carpeta real del escritorio (puede estar movida a OneDrive)."""
+    if config.ES_WINDOWS:
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                return os.path.expandvars(winreg.QueryValueEx(k, "Desktop")[0])
+        except OSError:
+            pass
+    return str(Path.home() / "Desktop")
+
+
+CANALES = {"web": "su ventana de escritorio", "voz": "conversación por voz en el PC", "telegram": "Telegram desde el teléfono (lejos del PC)",
            "pc": "la pantalla del PC del usuario (con voz)",
            "celular": "el celular del usuario, quizá lejos del PC: las herramientas marcadas [En el PC] actúan en su computador si está encendido"}
 
@@ -128,8 +208,42 @@ class Agente:
         sistema = "Windows (control total del PC)" if config.ES_WINDOWS else "servidor Linux/Docker (sin control del escritorio)"
         return PERSONALIDAD.format(
             nombre=config.nombre_asistente(), usuario=nombre_u, fecha=fecha_legible(), lugar=lugar,
-            canal=CANALES.get(canal, canal), sistema=sistema, memorias=memorias,
+            canal=CANALES.get(canal, canal), sistema=sistema, memorias=memorias, remate=self.remate(), escritorio=escritorio(),
             trato=f"- Dirígete al usuario como «{trato}» de vez en cuando, con naturalidad.\n" if trato else f"- Llámalo por su nombre ({nombre_u}) de vez en cuando.\n")
+
+    def remate(self) -> str:
+        """Más o menos una de cada tres respuestas cierra con una pulla (nunca dos seguidas): que sorprenda, no que canse."""
+        toca = not getattr(self, "remato", False) and random.random() < 0.45  # sin repetir seguidas queda en ~1 de cada 3
+        self.remato = toca
+        return REMATE_SI if toca else REMATE_NO
+
+    async def arranque(self, texto: str, llamadas: list) -> str:
+        """Frase corta que Maicol dice mientras arranca una acción (como quien trabaja y va hablando)."""
+        pulla = ("y de paso una pulla corta de amigo, tipo «aunque no entiendo pa' qué esta bobada, pero usted sabrá»"
+                 if getattr(self, "remato", False) else "con buena energía, sin chiste")
+        acciones = ", ".join(sorted({c["name"].replace("_", " ") for c in llamadas}))
+        prompt = [{"role": "system", "content":
+                   f"Eres {config.nombre_asistente()}, el asistente de {config.usuario() or 'tu usuario'}: un amigo colombiano carismático "
+                   "estilo JARVIS que lo trata de usted y le dice «señor». Te acaban de pedir algo y YA lo estás haciendo en este "
+                   f"momento ({acciones}). Escribe SOLO una frase corta (máximo 16 palabras) para decirla en voz alta mientras "
+                   f"trabajas: que ya estás en eso, {pulla}. No digas que ya terminaste ni des el resultado. Sin comillas ni emojis. "
+                   "Ejemplos del tono: «De una, señor, ya se lo armo.» · «Ya le miro eso, señor.» · "
+                   "«Listo, ya lo estoy creando… aunque pa' qué esta bobada, usted sabrá.»"},
+                  {"role": "user", "content": texto}]
+        frase = (await self.router.completar(prompt, "rapido")).strip().splitlines()[0].strip(" \"'«»")
+        return frase if 0 < len(frase) <= 160 else ""
+
+    async def avisar_arranque(self, texto: str, llamadas: list, emit, m_asist: dict, mensajes: list):
+        try:
+            frase = await asyncio.wait_for(self.arranque(texto, llamadas), 6)
+        except Exception as e:  # noqa: BLE001 - si no sale a tiempo, se sigue sin frase
+            log.debug("sin frase de arranque: %s", e)
+            return
+        if frase:
+            await emit({"type": "token", "text": frase + "\n"})
+            m_asist["content"] = frase  # el siguiente paso sabe lo que ya dijo
+            if getattr(self, "remato", False):  # la pulla ya salió al arrancar: el cierre va sin chiste
+                mensajes[0] = {**mensajes[0], "content": mensajes[0]["content"].replace(REMATE_SI, REMATE_NO)}
 
     def sistema_local(self) -> str:
         trato = config.tratamiento()
@@ -186,12 +300,20 @@ class Agente:
             if historial and isinstance(historial[-1].get("content"), str):
                 historial[-1] = {**historial[-1], "content": f"{await self.contexto_local(texto)}\n{historial[-1]['content']}"}
         mensajes = [{"role": "system", "content": await self.sistema(canal, texto, compacto=nivel == "local")}] + historial
+        # lo que ya se dibujó en el lienzo no se vuelve a mandar en cada mensaje (son miles de tokens)
+        for m in historial[:-1]:
+            for c in m.get("tool_calls") or []:
+                if c["function"]["name"] == "mostrar_visual" and len(c["function"].get("arguments") or "") > 300:
+                    c["function"]["arguments"] = json.dumps({"titulo": "(visual ya mostrado)", "html": "…"}, ensure_ascii=False)
         ctx = Contexto(router=self.router, memoria=self.memoria, canal=canal, sesion=sesion, difundir=self.difundir, notificar=self.notificar)
         # herramientas relevantes para lo que se habla (incluye las usadas en los últimos turnos)
         usadas = {c["function"]["name"] for m in historial[-8:] for c in (m.get("tool_calls") or [])}
         previo = next((m["content"] for m in reversed(historial[:-1]) if m["role"] == "assistant" and isinstance(m.get("content"), str)), "")
         esquemas_potentes = herramientas.esquemas(f"{texto} {previo[-300:]}", usadas)
         esquemas_local = herramientas.esquemas_locales()
+        guia = GUIA_VISUAL if any(e["function"]["name"] == "mostrar_visual" for e in esquemas_potentes) else ""
+        if guia and nivel != "local":
+            mensajes[0] = {**mensajes[0], "content": mensajes[0]["content"] + guia}
         final, meta = "", {}
 
         for paso in range(10):
@@ -210,7 +332,7 @@ class Agente:
                 if nivel == "local":
                     # la IA local no está o falló: la misma petición pasa a las potentes
                     nivel = "inteligente"
-                    mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto)}
+                    mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto) + guia}
                     await emit({"type": "reset"})
                     continue
                 final = str(e)
@@ -221,7 +343,7 @@ class Agente:
             if not fin["llamadas"] and nivel == "local" and ACCIONES.search(texto):
                 # la local respondió como si hubiera hecho algo, sin hacerlo: lo hace una potente
                 nivel = "inteligente"
-                mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto)}
+                mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto) + guia}
                 await emit({"type": "reset"})
                 continue
             if not fin["llamadas"]:
@@ -242,6 +364,10 @@ class Agente:
             self.memoria.guardar_mensaje(sesion, m_asist)
             if fin["texto"]:
                 await emit({"type": "token", "text": "\n"})
+            aviso = None
+            if paso == 0 and nivel != "local" and not (fin["texto"] or "").strip() and \
+                    any(c["name"] not in INSTANTANEAS for c in fin["llamadas"]):
+                aviso = asyncio.create_task(self.avisar_arranque(texto, fin["llamadas"], emit, m_asist, mensajes))
 
             for c in fin["llamadas"]:
                 try:
@@ -251,7 +377,7 @@ class Agente:
                 if not isinstance(args, dict):
                     args = {}
                 await emit({"type": "herramienta", "nombre": c["name"], "args": args, "estado": "inicio"})
-                if herramientas.es_peligrosa(c["name"]):
+                if herramientas.necesita_permiso(c["name"], args):
                     ok = await confirmar(c["name"], args)
                     resultado = await herramientas.ejecutar(c["name"], args, ctx) if ok else "El usuario NO autorizó esta acción. No la ejecutes ni insistas."
                 else:
@@ -259,11 +385,21 @@ class Agente:
                 await emit({"type": "herramienta", "nombre": c["name"], "args": args, "estado": "fin", "resultado": resultado[:400]})
                 if nivel == "local" and (len(resultado) > 2500 or paso >= 2 or c["name"] not in herramientas.todas()):
                     nivel = "inteligente"
-                    mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto)}
+                    mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto) + guia}
                 directa = respuesta_directa(c["name"], args, resultado) if nivel == "local" and len(fin["llamadas"]) == 1 else None
                 m_tool = {"role": "tool", "tool_call_id": c["id"], "content": resultado}
                 mensajes.append(m_tool)
                 self.memoria.guardar_mensaje(sesion, m_tool)
+            if aviso:
+                await aviso  # la frase de arranque siempre sale antes que la respuesta final
+            if all(c["name"] in ("mostrar_visual", "ocultar_visual") for c in fin["llamadas"]):
+                # ya habló mientras dibujaba: no hace falta otra vuelta a la IA solo para decir «ahí está»
+                dicho = (fin["texto"] or m_asist.get("content") or "").strip()
+                directa = dicho or "Ahí se lo dejé en el panel, señor."
+                if dicho:
+                    final = dicho
+                    self.memoria.guardar_mensaje(sesion, {"role": "assistant", "content": final}, meta)
+                    break
             if directa:
                 final = directa
                 await emit({"type": "token", "text": final})

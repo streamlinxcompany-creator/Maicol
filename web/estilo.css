@@ -460,3 +460,120 @@ body.limpio .barra-sup, body.limpio .barra-inf { position: relative; z-index: 3;
 .v3d-botones .v3d-imprimir { border-color: var(--cian); color: var(--cian); font-weight: 600; }
 .v3d-botones button:disabled { opacity: .5; cursor: wait; }
 .v3d-salida { white-space: pre-wrap; font-size: 13px; margin: 8px 0 0; padding: 8px; border-radius: 6px; background: rgba(0, 0, 0, .25); max-height: 260px; overflow: auto; }
+
+/* =====================================================================
+   MODO LATERAL (?lateral=1): el panel que sale del borde de la pantalla.
+   Solo el orbe que reacciona a la voz, la respuesta en pequeño y una barra mínima.
+   ===================================================================== */
+body.lateral.lateral {
+  --texto: #e8f4fa;
+  --texto-2: #6f8797;
+  background:
+    radial-gradient(120% 60% at 50% 30%, rgba(0, 229, 255, .10) 0%, rgba(0, 229, 255, 0) 60%),
+    linear-gradient(180deg, #071422 0%, #03080f 100%);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+}
+/* filo de luz del lado de la pantalla por donde sale */
+body.lateral.lateral::after {
+  content: ""; position: fixed; top: 10%; bottom: 10%; right: 0; width: 2px; z-index: 40; pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--acento), transparent); opacity: .55; transition: background .4s;
+}
+body.lateral.lateral.lado-izquierda::after { right: auto; left: 0; }
+body.lateral.lateral #arranque, body.lateral.lateral #fondo, body.lateral.lateral .col.izq, body.lateral.lateral .col.der, body.lateral.lateral .pildora,
+body.lateral.lateral .sugerencias, body.lateral.lateral #btn-panel, body.lateral.lateral #btn-clip, body.lateral.lateral #btn-ojo,
+body.lateral.lateral .interruptor, body.lateral.lateral .centro-sup { display: none !important; }
+
+/* cabecera: nombre pequeño y dos iconos */
+body.lateral.lateral .barra-sup { padding: 16px 18px 0; background: none; border: 0; }
+body.lateral.lateral .marca { font-family: "Orbitron", sans-serif; font-size: 11px; font-weight: 500; letter-spacing: .5em; color: #9fdcea; }
+body.lateral.lateral .marca small { display: none; }
+body.lateral.lateral .acciones-sup { gap: 2px; }
+body.lateral.lateral .icono { width: 34px; height: 34px; border: 0; background: transparent; border-radius: 10px; }
+body.lateral.lateral .icono:hover { background: rgba(255, 255, 255, .06); box-shadow: none; }
+body.lateral.lateral .icono svg { width: 16px; height: 16px; stroke: #8fa9b8; }
+
+/* centro: el orbe y debajo la respuesta */
+body.lateral.lateral .rejilla { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0 22px; max-width: none; }
+body.lateral.lateral .centro { display: flex; flex-direction: column; flex: 1; min-height: 0; justify-content: flex-start; padding-top: 4vh; gap: 0; }
+body.lateral.lateral .reactor-caja { width: min(300px, 74vw, 40vh); margin: 0 auto; transition: transform .5s cubic-bezier(.2, .8, .2, 1); }
+body.lateral.lateral[data-modo="hablando"] .reactor-caja { transform: scale(1.04); }
+body.lateral.lateral .estado {
+  display: block; position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%); margin: 0;
+  font: 500 10.5px/1 "Inter", sans-serif; letter-spacing: .32em; color: var(--acento); opacity: .75; text-shadow: none;
+}
+body.lateral.lateral .subtitulo {
+  display: block !important; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none;
+  margin: 18px 0 0; padding: 18px 2px 8px; text-align: center; text-shadow: none;
+  font: 400 15px/1.6 "Inter", sans-serif; color: #c9dde8; letter-spacing: .005em;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 22px, #000 calc(100% - 10px), transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0, #000 22px, #000 calc(100% - 10px), transparent 100%);
+}
+body.lateral.lateral .subtitulo::-webkit-scrollbar { display: none; }
+body.lateral.lateral .subtitulo .usuario { display: block; color: var(--texto-2); font-size: 13px; font-style: italic; }
+body.lateral.lateral .subtitulo .pregunta { display: block; color: var(--texto-2); font-size: 12.5px; margin-bottom: 10px; }
+body.lateral.lateral .subtitulo:empty::before { content: "Toca el micrófono o escríbeme"; color: #3f5767; font-size: 13px; }
+
+/* barra inferior: una sola píldora con micrófono, texto y enviar */
+body.lateral.lateral .barra-inf {
+  margin: 0 14px 14px; padding: 6px; gap: 6px; align-items: center; max-width: none; width: auto;
+  background: rgba(255, 255, 255, .045); border: 1px solid rgba(255, 255, 255, .08); border-radius: 30px;
+  backdrop-filter: blur(10px); transition: border-color .2s;
+}
+body.lateral.lateral .barra-inf:focus-within { border-color: rgba(0, 229, 255, .4); }
+body.lateral.lateral .entrada-caja { background: none; border: 0; min-height: 40px; padding: 0 4px; }
+body.lateral.lateral .entrada-caja:focus-within { box-shadow: none; }
+body.lateral.lateral #entrada { font: 400 14.5px/1.4 "Inter", sans-serif; padding: 10px 0; max-height: 96px; }
+body.lateral.lateral #entrada::placeholder { color: #4f6878; }
+body.lateral.lateral .mic { width: 42px; height: 42px; border: 0; background: rgba(0, 229, 255, .12); box-shadow: none; }
+body.lateral.lateral .mic svg { width: 19px; height: 19px; }
+body.lateral.lateral .mic.activo { background: rgba(61, 255, 168, .18); box-shadow: 0 0 22px rgba(61, 255, 168, .45); }
+body.lateral.lateral .enviar { width: 42px; height: 42px; }
+body.lateral.lateral .enviar svg { width: 18px; height: 18px; }
+
+/* al salir del borde: el contenido entra con un pequeño desliz */
+body.lateral.lateral.entrando .barra-sup, body.lateral.lateral.entrando .centro, body.lateral.lateral.entrando .barra-inf { animation: lateral-entra .42s cubic-bezier(.2, .8, .2, 1) both; }
+body.lateral.lateral.entrando .centro { animation-delay: .04s; }
+body.lateral.lateral.entrando .barra-inf { animation-delay: .08s; }
+body.lateral.lateral.lado-izquierda.entrando .barra-sup, body.lateral.lateral.lado-izquierda.entrando .centro, body.lateral.lateral.lado-izquierda.entrando .barra-inf { animation-name: lateral-entra-izq; }
+@keyframes lateral-entra { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes lateral-entra-izq { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+
+/* ventanas emergentes al ancho del panel */
+body.lateral.lateral .modal-caja { width: calc(100vw - 28px); max-width: none; }
+body.lateral.lateral #avisos { left: 12px; right: 12px; }
+
+/* =====================================================================
+   LIENZO VISUAL: panel donde Maicol dibuja (mostrar_visual)
+   ===================================================================== */
+.lienzo {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(820px, 62vw); z-index: 30;
+  display: flex; flex-direction: column; background: #040a12; border-left: 1px solid rgba(0, 229, 255, .18);
+  box-shadow: -30px 0 80px rgba(0, 0, 0, .55); transform: translateX(104%); visibility: hidden;
+  transition: transform .38s cubic-bezier(.2, .8, .2, 1), visibility 0s .38s;
+}
+body.con-lienzo .lienzo { transform: none; visibility: visible; transition: transform .38s cubic-bezier(.2, .8, .2, 1); }
+.lienzo-cab { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px 18px; border-bottom: 1px solid rgba(0, 229, 255, .1); }
+.lienzo-cab b { flex: 1; font: 600 11px/1.2 "Inter", "Segoe UI", sans-serif; letter-spacing: .3em; text-transform: uppercase; color: #9fdcea;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lienzo-punto { width: 7px; height: 7px; border-radius: 50%; background: var(--cian); box-shadow: 0 0 10px var(--cian); animation: latido 1.6s infinite; }
+.lienzo-cab button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: #8fa9b8; font-size: 14px; }
+.lienzo-cab button:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+#lienzo-marco { flex: 1; width: 100%; border: 0; background: #040a12; }
+.chip.visual { cursor: pointer; color: #7fdcef !important; }
+.chip.visual:hover { text-decoration: underline; }
+
+/* en el panel lateral: la ventana se ensancha y el lienzo queda pegado al lado del chat */
+body.lateral.lateral .lienzo { left: 0; right: auto; width: calc(100% - 400px); border-left: 0; border-right: 1px solid rgba(0, 229, 255, .14);
+  box-shadow: none; transform: translateX(-30px); opacity: 0; transition: opacity .3s, transform .4s cubic-bezier(.2, .8, .2, 1), visibility 0s .4s; }
+body.lateral.lateral.con-lienzo .lienzo { transform: none; opacity: 1; transition: opacity .35s .1s, transform .45s .1s cubic-bezier(.2, .8, .2, 1); }
+body.lateral.lateral.con-lienzo > .barra-sup, body.lateral.lateral.con-lienzo > .rejilla, body.lateral.lateral.con-lienzo > .barra-inf {
+  width: 400px; align-self: flex-end; }
+body.lateral.lateral.con-lienzo > .barra-inf { width: 372px; margin-right: 14px; }
+body.lateral.lateral.lado-izquierda .lienzo { left: auto; right: 0; border-right: 0; border-left: 1px solid rgba(0, 229, 255, .14); transform: translateX(30px); }
+body.lateral.lateral.lado-izquierda.con-lienzo > .barra-sup, body.lateral.lateral.lado-izquierda.con-lienzo > .rejilla,
+body.lateral.lateral.lado-izquierda.con-lienzo > .barra-inf { align-self: flex-start; }
+body.lateral.lateral.lado-izquierda.con-lienzo > .barra-inf { margin-left: 14px; }
+/* el modo limpio centra la rejilla con margin auto: con el lienzo abierto va pegada a su lado */
+body.lateral.lateral.con-lienzo > .rejilla { margin: 0 0 0 auto; }
+body.lateral.lateral.lado-izquierda.con-lienzo > .rejilla { margin: 0 auto 0 0; }

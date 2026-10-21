@@ -32,6 +32,8 @@ CATALOGO = [
         ],
         "patrones_extra": [r"^gemini-[3-9][\w.]*-flash(-lite)?(-preview)?$"],
         "vision_extra": True,
+        # los Gemini 3.x piensan por defecto y tardan 2–14 s; «low» lo aceptan todos («minimal» no)
+        "cuerpo_extra": {"reasoning_effort": "low"},
     },
     {
         "id": "groq",
@@ -52,6 +54,8 @@ CATALOGO = [
         ],
         # Groq renueva su catálogo seguido: adopta solos los Qwen 3.x y Kimi que aparezcan
         "patrones_extra": [r"^qwen/qwen3[\w.-]*$", r"^moonshotai/kimi-k2[\w.-]*$"],
+        # rapidísimos pero se confunden con la personalidad y las herramientas: para tareas de fondo
+        "rapido_extra": [r"^qwen/"],
         "stt": "whisper-large-v3-turbo",
     },
     {
