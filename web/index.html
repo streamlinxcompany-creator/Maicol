@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>MAICOL</title>
 <link rel="icon" href="/static/jarvis.png">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -10,7 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="MAICOL">
-<link rel="apple-touch-icon" href="/static/icono-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/estilo.css">
@@ -36,8 +36,7 @@
   </div>
   <div class="acciones-sup">
     <button id="btn-panel" class="icono solo-limpio" title="Sistema e IAs"></button>
-    <button id="btn-nueva-sup" class="icono solo-limpio" title="Conversación nueva"></button>
-    <button id="btn-silencio" class="icono" title="Voz de Maicol (activar/silenciar)"></button>
+    <button id="btn-nueva-sup" class="icono solo-limpio" title="Conversación nueva"></button>    <button id="btn-silencio" class="icono" title="Voz de Maicol (activar/silenciar)"></button>
     <button id="btn-config" class="icono" title="Ajustes"></button>
   </div>
 </header>
@@ -101,10 +100,78 @@
 <aside id="lienzo" class="lienzo" aria-hidden="true">
   <div class="lienzo-cab"><span class="lienzo-punto"></span><b id="lienzo-titulo"></b><button id="lienzo-cerrar" title="Cerrar">✕</button></div>
   <iframe id="lienzo-marco" sandbox="allow-scripts" title="Lienzo de Maicol"></iframe>
+  <!-- un tablero de análisis («saca analíticas»): es página propia de Maicol, no HTML de la IA -->
+  <iframe id="lienzo-tablero" class="oculto" title="Tablero de análisis"></iframe>
 </aside>
 
 <div id="velo" class="velo"></div>
 <div id="avisos"></div>
+
+<!-- control remoto: la pantalla del PC en vivo para usarla como táctil desde el celular -->
+<aside id="control-remoto" class="control-remoto oculto">
+  <div class="control-barra">
+    <b><span class="control-punto"></span>PC EN VIVO</b>
+    <button data-c="ayuda" title="Cómo se usa">?</button>
+    <button data-c="hd" title="Más nitidez (gasta más datos)">HD</button>
+    <button data-c="completa" title="Pantalla completa">⛶</button>
+    <button data-c="cerrar" class="salir" title="Salir">✕ Salir</button>
+  </div>
+  <div id="control-zona" class="control-zona">
+    <img id="control-imagen" alt="Pantalla del computador en vivo" draggable="false">
+    <div id="control-ayuda" class="control-ayuda"></div>
+    <div id="control-voz" class="control-voz oculto"></div>
+  </div>
+  <div class="control-teclas oculto">
+    <div class="grupo"><span>Ratón</span><button data-c="derecho">Clic derecho</button><button data-c="doble">Doble clic</button></div>
+    <div class="grupo"><span>Teclas</span><button data-t="esc">Esc</button><button data-t="tab">Tab</button><button data-t="enter">Enter</button><button data-t="borrar">⌫</button><button data-t="supr">Supr</button><button data-t="win">⊞ Win</button><button data-t="inicio">Inicio</button><button data-t="fin">Fin</button></div>
+    <div class="grupo flechas"><button data-t="arriba">↑</button><button data-t="izquierda">←</button><button data-t="abajo">↓</button><button data-t="derecha">→</button></div>
+    <div class="grupo"><span>Ventanas</span><button data-a="cambiar_ventana">Alt+Tab</button><button data-a="escritorio">Escritorio</button><button data-a="minimizar">Minimizar</button><button data-a="maximizar">Maximizar</button><button data-a="cerrar_ventana">Cerrar ventana</button><button data-a="explorador">Archivos</button><button data-a="buscar">Buscar</button><button data-a="tareas">Adm. tareas</button></div>
+    <div class="grupo"><span>Editar</span><button data-a="copiar">Copiar</button><button data-a="pegar">Pegar</button><button data-a="cortar">Cortar</button><button data-a="deshacer">Deshacer</button><button data-a="todo">Selec. todo</button><button data-a="guardar">Guardar</button><button data-a="recorte">Recorte</button></div>
+    <div class="grupo"><span>Navegador</span><button data-a="pestana_nueva">Pestaña +</button><button data-a="cerrar_pestana">Cerrar pestaña</button><button data-a="recargar">Recargar</button><button data-a="zoom_mas">Zoom +</button><button data-a="zoom_menos">Zoom −</button></div>
+    <div class="grupo"><span>Sonido</span><button data-a="volumen_menos">🔉</button><button data-a="volumen_mas">🔊</button><button data-a="silenciar">🔇</button><button data-a="pausa">⏯</button></div>
+  </div>
+  <!-- escribir en el PC viendo lo que escribes: «escribir y enviar» (revisas y mandas) o «en vivo» (cada letra va directo) -->
+  <div id="control-escribir" class="control-escribir oculto">
+    <div class="ce-cab">
+      <button data-m="frase">✍ Escribir y enviar</button><button data-m="vivo">⚡ En vivo</button>
+      <span id="ce-nota" class="ce-nota"></span>
+      <button data-k="listo" class="ce-listo">Listo</button>
+    </div>
+    <div class="ce-fila">
+      <textarea id="control-texto" rows="1" enterkeyhint="send" placeholder="Escribe aquí lo que va al PC…" aria-label="Escribir en el PC"></textarea>
+      <button id="ce-enviar" class="ce-enviar">Enviar</button>
+    </div>
+    <div class="ce-teclas">
+      <label class="ce-enter"><input type="checkbox" id="ce-con-enter"> + Enter</label>
+      <button data-t="borrar">⌫</button><button data-t="enter">↵</button><button data-t="tab">Tab</button>
+      <button data-t="izquierda">←</button><button data-t="derecha">→</button><button data-a="todo">Sel. todo</button>
+      <button data-a="pegar">Pegar</button><button data-a="deshacer">Deshacer</button>
+    </div>
+  </div>
+  <nav class="control-dock">
+    <button data-c="modo"><i>🖱</i><span>Touchpad</span></button>
+    <button data-c="teclado"><i>⌨</i><span>Teclado</span></button>
+    <button data-c="dictar"><i>🎤</i><span>Dictar</span></button>
+    <button data-c="maicol" class="maicol"><i>◉</i><span>Maicol</span></button>
+    <button data-c="mas"><i>⋯</i><span>Teclas</span></button>
+  </nav>
+</aside>
+
+<!-- Claude Code: hablarle por voz o texto desde cualquier pantalla y ver lo que va haciendo -->
+<section id="panel-claude" class="panel-claude oculto" aria-label="Claude Code">
+  <div class="pc-cab"><b><span class="pc-logo">✳</span>CLAUDE CODE</b><small id="pc-estado"></small><button id="pc-cerrar" class="icono" title="Cerrar">✕</button></div>
+  <div id="pc-aviso" class="pc-aviso oculto"></div>
+  <div id="pc-lista" class="pc-lista"></div>
+  <div class="pc-redactar">
+    <div id="pc-contexto" class="pc-contexto"></div>
+    <label class="pc-hacer"><input id="pc-hacer" type="checkbox"> Puede hacer cambios y ejecutar comandos en el PC</label>
+    <div class="pc-fila">
+      <button id="pc-mic" class="mic" title="Dictar (di «envíalo» al final para mandarlo solo)"></button>
+      <textarea id="pc-texto" rows="1" placeholder="Dile algo a Claude…"></textarea>
+      <button id="pc-enviar" class="enviar" title="Enviar a Claude"></button>
+    </div>
+  </div>
+</section>
 
 <div id="modal" class="modal oculto">
   <div class="modal-caja">
@@ -125,6 +192,7 @@
   <label>Voz de Maicol<select id="sel-voz"></select></label>
   <label>Velocidad de voz<input id="vel-voz" type="range" min="-30" max="40" step="5" value="20"><span id="vel-txt">+20%</span></label>
   <label class="check"><input id="chk-voz" type="checkbox" checked> Responder con voz</label>
+  <label class="check"><input id="chk-voz-rapida" type="checkbox"> Voz rápida del dispositivo (si aquí no está la voz de Maicol, habla con la del teléfono al instante en vez de esperar al PC)</label>
   <label class="check"><input id="chk-sonidos" type="checkbox" checked> Efectos de sonido</label>
   <label>IA local del servidor
     <select id="sel-local">
@@ -140,6 +208,9 @@
   <div class="botones-ajustes">
     <button id="btn-instalar" class="oculto">📲 Instalar Maicol como app</button>
     <button id="btn-celular">📱 Conectar el celular</button>
+    <button id="btn-avisos" class="oculto">🔔 Avisos en este celular (aunque Maicol esté cerrado)</button>
+    <button id="btn-control" class="oculto">🖥 Controlar el PC desde aquí</button>
+    <button id="btn-abrir-claude">✳ Claude Code (tareas de programación)</button>
     <div id="qr-celular" class="oculto"></div>
     <button id="btn-recargar">Recargar proveedores (.env)</button>
     <button id="btn-enfriar">Reiniciar enfriamientos</button>
@@ -159,6 +230,7 @@
 </div>
 
 <script type="importmap">{"imports": {"three": "/static/vendor/three/three.module.min.js", "three/addons/": "/static/vendor/three/jsm/"}}</script>
+<script src="/static/numeros.js"></script>
 <script src="/static/app.js"></script>
 <script type="module" src="/static/visor3d.js"></script>
 </body>

@@ -18,6 +18,34 @@ from . import config
 RUTA = config.DATOS / "aperturas.json"
 SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+
+def _soy_admin() -> bool:
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
+def iniciar(destino: str):
+    """Como os.startfile, pero si el núcleo corre como administrador (scripts/instalar_admin.ps1) lo abre la pestaña
+    lateral, que es usuario normal: así lo abierto no hereda más permisos de los necesarios y se pueden seguir
+    arrastrando archivos a esas ventanas. (explorer.exe no sirve: desde administrador a veces abre «Documentos»
+    en vez del enlace.) Sin la pestaña, un enlace va directo al navegador predeterminado."""
+    if not _soy_admin():
+        os.startfile(destino)
+        return
+    from . import superficies
+
+    if superficies.abrir_como_usuario(destino):
+        return
+    navegador = ruta_navegador(navegador_predeterminado() or "edge") if re.match(r"^https?://", destino) else None
+    if navegador:
+        subprocess.Popen([navegador, destino], creationflags=SIN_VENTANA)
+    else:
+        os.startfile(destino)
+
 # preferencias que el usuario ya dijo; se pueden cambiar diciendo «abre X en la app / en el navegador»
 PRESETS = {
     "spotify": {"tipo": "web", "destino": "https://open.spotify.com", "navegador": "brave", "nombre": "Spotify"},
@@ -142,9 +170,9 @@ def lanzar_app(app_id: str):
         if notion.abrir_app():
             return
     if os.path.exists(app_id):
-        os.startfile(app_id)
+        iniciar(app_id)
     else:
-        subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"], creationflags=SIN_VENTANA)
+        iniciar(f"shell:AppsFolder\\{app_id}")
 
 
 # ---------- navegadores ----------
@@ -173,7 +201,7 @@ def abrir_web(url: str, navegador: str | None) -> str:
     if ruta:
         subprocess.Popen([ruta, url], creationflags=SIN_VENTANA)
         return navegador
-    os.startfile(url)
+    iniciar(url)
     return navegador_predeterminado() or "el navegador predeterminado"
 
 
@@ -194,13 +222,13 @@ def abrir(objetivo: str, donde: str | None = None, navegador: str | None = None)
         usado = abrir_web(o, navegador)
         return f"Abrí {o} en {nombre_navegador(usado)}."
     if Path(os.path.expandvars(os.path.expanduser(o))).exists():
-        os.startfile(os.path.expandvars(os.path.expanduser(o)))
+        iniciar(os.path.expandvars(os.path.expanduser(o)))
         return f"Abrí {o}."
 
     clave = normalizar(o)
     if clave in SISTEMA and donde != "web":
         destino = SISTEMA[clave]
-        (os.startfile if destino.endswith(":") else lambda d: subprocess.Popen(["cmd", "/c", "start", "", d], creationflags=SIN_VENTANA))(destino)
+        iniciar(destino)
         return f"Abrí {o}."
 
     previo = recuerdo(clave)

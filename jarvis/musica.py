@@ -206,9 +206,81 @@ async def _que_suena(espera: float = 5) -> dict | None:
     return None
 
 
+def servicio() -> str:
+    """Dónde poner música: «youtube» (YouTube Music en tu navegador de siempre) o «spotify» (web en Brave). MUSICA en .env."""
+    return "youtube" if "youtube" in (config.env("MUSICA", "spotify") or "").lower() else "spotify"
+
+
+_videos: dict[str, str] = {}  # búsquedas ya resueltas en YouTube
+
+
+def _buscar_video(busqueda: str) -> str | None:
+    """El id del primer video que da YouTube para esa búsqueda (sirve igual en music.youtube.com)."""
+    clave = busqueda.lower().strip()
+    if clave in _videos:
+        return _videos[clave]
+    import httpx
+
+    try:
+        r = httpx.get("https://www.youtube.com/results", params={"search_query": busqueda}, timeout=15, follow_redirects=True,
+                      headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/130 Safari/537.36", "Accept-Language": "es-CO,es;q=0.9"})
+        m = re.search(r'"videoId":"([\w-]{11})"', r.text)
+    except httpx.HTTPError:
+        m = None
+    if m:
+        _videos[clave] = m.group(1)
+    return _videos.get(clave)
+
+
+async def _poner_youtube(busqueda: str, eleccion: str) -> str:
+    """Abre la canción en el reproductor de YouTube Music (no en la búsqueda) en una pestaña de tu navegador y
+    comprueba con los controles multimedia de Windows que de verdad suene; si quedó en pausa, le da reproducir."""
+    video = await asyncio.to_thread(_buscar_video, busqueda)
+    if not video:
+        return f"No encontré «{busqueda}» en YouTube Music."
+
+    async def del_navegador() -> list[dict]:
+        try:
+            return [x for x in await _sonando() if x["app"].lower().startswith(("msedge", "chrome", "brave", "firefox", "opera"))]
+        except Exception:  # noqa: BLE001
+            return []
+
+    # lo que ya sonaba en el navegador se pausa: así no suenan dos cosas y no se confunde con la canción nueva
+    viejas, siguen = set(), set()  # lo que había antes, y lo que sonaba y no se dejó pausar
+    for x in await del_navegador():
+        viejas.add(x["titulo"])
+        if x["estado"] == REPRODUCIENDO:
+            try:
+                if not await x["sesion"].try_pause_async():
+                    siguen.add(x["titulo"])
+            except Exception:  # noqa: BLE001
+                siguen.add(x["titulo"])
+    await asyncio.to_thread(aperturas.abrir_web, f"https://music.youtube.com/watch?v={video}", None)
+    fin, intento = time.time() + 20, 0
+    while time.time() < fin:
+        await asyncio.sleep(1.5)
+        sesiones = await del_navegador()
+        # lo viejo quedó en pausa: si algo suena ahora es la canción nueva (aunque sea la misma que ya sonaba)
+        if sonando := next((x for x in sesiones if x["estado"] == REPRODUCIENDO and x["titulo"] and x["titulo"] not in siguen), None):
+            return f"Sonando en YouTube Music ({eleccion}): {sonando['titulo']} de {sonando['artista']}."
+        intento += 1
+        if intento % 3 == 0:  # cargó pero el navegador no la arrancó sola: reproducir, solo a la nueva (no a una pestaña vieja)
+            for x in [x for x in sesiones if x["titulo"] and x["titulo"] not in viejas]:
+                try:
+                    await x["sesion"].try_play_async()
+                except Exception:  # noqa: BLE001
+                    pass
+    return (f"NO está sonando: abrí {busqueda} en YouTube Music ({eleccion}) pero no arrancó. Dígaselo tal cual al usuario (no "
+            "diga que suena). Si pasa siempre, que permita la reproducción automática para music.youtube.com en su navegador.")
+
+
 async def poner(peticion: str | None = None) -> str:
     if not config.ES_WINDOWS:
         return "La música solo funciona en el PC con Windows."
+    if servicio() == "youtube":
+        busqueda = (peticion or "").strip() or _elegir()[0] or "música en tendencia Colombia"
+        return await _poner_youtube(busqueda, f"por tu pedido «{peticion}»" if peticion else "elegido según lo que sueles escuchar")
     titulo = None
     if peticion and peticion.strip():
         busqueda = peticion.strip()

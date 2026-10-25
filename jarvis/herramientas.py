@@ -103,11 +103,14 @@ def _corto(texto: str, maximo: int) -> str:
 
 
 # Mandar las 31 herramientas en cada petición cuesta ~2.400 tokens: se mandan solo las relevantes.
-NUCLEO = {"fecha_hora", "buscar_web", "calcular", "recordar", "buscar_memoria", "crear_recordatorio", "abrir", "cerrar", "estado_ia"}
+NUCLEO = {"fecha_hora", "buscar_web", "leer_web", "calcular", "recordar", "buscar_memoria", "crear_recordatorio", "abrir", "cerrar", "estado_ia",
+          # siempre a mano para no rendirse nunca: un comando del PC, lo ya aprendido, y Claude para lo que no sepa hacer
+          "ejecutar_comando", "usar_habilidad", "hablar_con_claude"}
 GRUPOS = [
+    ({"abrir_control_remoto", "cerrar_control_remoto"}, ("control remoto", "controlar el computador", "control del computador", "control del pc", "mouse remoto", "manejar el pc", "maneja el pc")),
     ({"clima"}, ("clima", "tiempo hace", "llov", "lluvia", "temperatura", "calor", "frío", "frio", "pronóstico", "pronostico", "sol ")),
     ({"leer_web", "noticias", "wikipedia"}, ("noticia", "página", "pagina", "web", "http", "www", "wikipedia", "quién es", "quien es", "qué es", "que es", "lee ", "artículo", "articulo", "historia de")),
-    ({"multimedia"}, ("volumen", "música", "musica", "canción", "cancion", "pausa", "siguiente", "anterior", "sube", "baja", "silencia", "reproduce")),
+    ({"multimedia", "volumen_pc"}, ("volumen", "música", "musica", "canción", "cancion", "pausa", "siguiente", "anterior", "sube", "baja", "silencia", "reproduce")),
     ({"ver_pantalla", "portapapeles"}, ("pantalla", "mira", "ves ", "ves?", "qué ves", "copia", "pega", "portapapeles", "esto")),
     ({"estado_sistema", "energia"}, ("pc", "computador", "ordenador", "cpu", "ram", "batería", "bateria", "sistema", "apaga", "reinicia", "bloquea", "suspende", "lento", "memoria del")),
     ({"listar_archivos", "leer_archivo", "escribir_archivo", "crear_carpeta", "ejecutar_comando"}, ("archivo", "carpeta", "bloc", "block", "nota", "txt", "escritorio", "documento", "comando", "powershell", "script", "instala", "crea un", "guarda en")),
@@ -115,8 +118,8 @@ GRUPOS = [
     ({"servidor_estado", "servidor_comando", "servidor_encender"}, ("servidor", "casaos", "server", "docker", "contenedor", "enciende")),
     ({"protocolos", "ejecutar_protocolo", "crear_protocolo"}, ("protocolo", "modo ", "macro", "rutina")),
     ({"notion_ver", "notion_buscar", "notion_leer", "notion_consultar", "notion_crear_nota"}, ("notion", "clase", "horario", "calendario", "apunte", "base de datos", "mis tareas", "mis notas", "nota en")),
-    ({"poner_musica", "mis_gustos_musicales", "multimedia"}, ("música", "musica", "canción", "cancion", "spotify", "pon algo", "ponme", "playlist", "lista de", "escuchar", "artista", "banda", "álbum", "album", "concentrarme", "relajarme", "gustos")),
-    ({"preguntar_a_claude", "encargar_a_claude", "seguir_con_claude", "tareas_claude"}, ("claude", "complej", "programa", "código", "codigo",
+    ({"poner_musica", "mis_gustos_musicales", "multimedia"}, ("música", "musica", "canción", "cancion", "spotify", "youtube", "pon algo", "ponme", "playlist", "lista de", "escuchar", "artista", "banda", "álbum", "album", "concentrarme", "relajarme", "gustos")),
+    ({"hablar_con_claude", "preguntar_a_claude", "tareas_claude", "abrir_panel_claude", "chats_de_claude"}, ("claude", "cloud", "clod", "complej", "programa", "código", "codigo",
                                                                                            "script", "función", "funcion", "error en", "bug", "refactor", "revisa el proyecto", "investiga a fondo")),
     ({"activar_modo", "salir_modo", "modos", "crear_modo", "abrir_juego"}, ("modo", "jugar", "juego", "trabajar", "a trabajar", "noche", "steam", "partida")),
     ({"modelo_3d_abrir", "impresoras_3d", "impresion_3d_planear", "imprimir_3d", "estado_impresoras_3d", "controlar_impresion_3d"}, ("imprim", "impresora", "3d", "stl", "3mf", "bambu", "filamento", "ams", "lamina", "plato", "pieza", "relleno", "soporte", "pared", "pendiente", "pausa", "reanuda", "cancela", "cómo va", "como va", "progreso")),
@@ -125,9 +128,33 @@ GRUPOS = [
       "cómo está el", "como esta el", "cómo va el", "como va el", "estado del", "rendimiento", "compar", "panel", "en pantalla")),
     ({"buscar_archivos", "enviar_archivo", "archivos_recibidos", "guardar_en_pc"}, ("archivo", "documento", "pdf", "foto", "imagen", "video",
       "tráeme", "traeme", "mándame", "mandame", "pásame", "pasame", "envíame", "enviame", "descarga", "guárdalo", "guardalo", "guarda", "compart")),
+    ({"saca_analiticas", "tablero", "mostrar_tablero", "tableros", "terminar_analisis", "reorganizar_tablero", "borrar_analisis"},
+     ("analític", "analitic", "analiz", "tablero", "esquema", "aclar", "pensar", "pensamiento", "lluvia de ideas", "mapa mental",
+      "idea de negocio", "decidir", "decisión", "decision", "reabr", "retom", "proyecto", "organiza", "ordena", "enlist", "lista",
+      "borra", "bórra", "olvida", "elimina", "historial")),
+    ({"ensenar_pronunciacion"}, ("pronunci", "se dice", "dilo como", "dígalo como", "digalo como", "lo dices", "lo dice mal", "suena como")),
     ({"como_abro"}, ("cómo abres", "como abres", "dónde abres", "donde abres", "cómo abro", "como abro", "recuerdas abrir")),
-    ({"enviar_al_telefono"}, ("teléfono", "telefono", "celular", "telegram", "móvil", "movil", "mándame", "mandame", "envíame", "enviame")),
+    ({"enviar_al_telefono", "avisarme_cuando", "vigilancias"}, ("teléfono", "telefono", "celular", "telegram", "móvil", "movil",
+      "mándame", "mandame", "envíame", "enviame", "notifica", "avís", "avis", "avise", "cuando termine", "cuando acabe", "cuando se",
+      "cuando pase", "vigila", "pendiente de")),
 ]
+
+
+# Órdenes inconfundibles que no se dejan a criterio de la IA (ver Agente.atajo): frase -> (herramienta, argumentos)
+ATAJOS = [
+    (re.compile(r"\b(saca|s[aá]came|saquemos|sacar|abre|[aá]breme|abramos|abrir|activa|activemos|pon|ponme|modo)\b.{0,12}"
+                r"\banal[ií]tic|\bmodo\s+an[aá]lisis\b"
+                # «analicemos», «analicemos algo porfa»: sin tema, a abrir en blanco (con tema lo entiende la IA)
+                r"|^\W*(maicol\W+)?(analicemos|analizemos|pensemos)(\s+(algo|un\s+rato|porfa|porf|por\s+favor|pues|ya|juntos))*\W*$"),
+     "saca_analiticas", {}),
+]
+
+
+def atajo(texto: str) -> tuple[str, dict] | None:
+    t = (texto or "").lower()
+    if len(t) > 80:  # una frase larga ya trae contenido: mejor que la IA la entienda completa
+        return None
+    return next(((nombre, dict(args)) for patron, nombre, args in ATAJOS if patron.search(t)), None)
 
 
 def relevantes(contexto: str, usadas: set | None = None) -> set:
@@ -136,6 +163,10 @@ def relevantes(contexto: str, usadas: set | None = None) -> set:
     for nombres, palabras in GRUPOS:
         if any(p in t for p in palabras):
             elegidas |= nombres
+    from . import analisis
+
+    if analisis.activo():  # en pleno análisis sus respuestas no traen palabras clave («porque ella…»): el tablero sigue a mano
+        elegidas |= analisis.HERRAMIENTAS_TABLERO
     return elegidas
 
 
@@ -206,7 +237,7 @@ PERMISO = {  # herramienta -> ¿esta llamada concreta necesita permiso?
     "crear_protocolo": lambda a: False,
     "crear_modo": lambda a: False,
     "notion_crear_nota": lambda a: False,
-    # imprimir_3d y encargar_a_claude: siempre (gastan material o editan archivos)
+    # imprimir_3d: siempre (gasta material)
 }
 
 
@@ -376,7 +407,7 @@ async def buscar_web(ctx, consulta, cantidad=6):
 
         res = await asyncio.to_thread(lambda: list(DDGS().text(consulta, region="es-es", max_results=cantidad)))
         if res:
-            return "\n\n".join(f"{i + 1}. {r.get('title')}\n{r.get('href')}\n{r.get('body')}" for i, r in enumerate(res))
+            return "\n\n".join(f"{i + 1}. {r.get('title')}\n{r.get('href')}\n{r.get('body')}" for i, r in enumerate(res)) + SOLO_RESUMENES
     except Exception:  # noqa: BLE001
         pass
     r = await http.post("https://html.duckduckgo.com/html/", data={"q": consulta})
@@ -387,7 +418,12 @@ async def buscar_web(ctx, consulta, cantidad=6):
         if "uddg=" in url:
             url = urllib.parse.unquote(url.split("uddg=")[1].split("&")[0])
         out.append(f"{i + 1}. {limpiar(tit)}\n{url}\n{limpiar(snip)}")
-    return "\n\n".join(out) or "Sin resultados."
+    return "\n\n".join(out) + SOLO_RESUMENES if out else "Sin resultados."
+
+
+# las IAs gratis responden con lo que «suena» en los resúmenes: si la pregunta es una cifra, que lean la fuente
+SOLO_RESUMENES = ("\n\n(Esto son solo resúmenes. Si le preguntaron una cifra, un límite, un precio o un plan y aquí no aparece "
+                  "exacto, abre la página oficial con leer_web antes de responder; no supongas «no hay límite».)")
 
 
 @herramienta("leer_web", "Descarga una página web y devuelve su texto principal.",
@@ -529,15 +565,29 @@ def metricas() -> dict:
 @herramienta("mostrar_visual", "Abre el lienzo visual (panel HUD pegado al chat) y dibuja ahí con HTML usando la plantilla: "
              "estado del PC, cómo funciona algo, diagramas, pasos, comparaciones, datos.",
              {"titulo": P("string", "Título corto del panel"),
-              "html": P("string", "Contenido HTML con las piezas de la plantilla (y SVG/script si hace falta)")}, ["titulo", "html"])
-async def mostrar_visual(ctx, titulo, html):
+              "html": P("string", "Contenido HTML con las piezas de la plantilla (y SVG/script si hace falta)"),
+              "donde": P("string", "'panel' (por defecto, junto al chat) o 'ventana' (ventana grande propia en el PC, para "
+                         "algo amplio como un tablero de datos o un diagrama grande)", ["panel", "ventana"])}, ["titulo", "html"])
+async def mostrar_visual(ctx, titulo, html, donde="panel"):
     if len(html) > 80000:
         return "El visual es demasiado grande; hazlo más simple."
-    if not ctx.difundir:
+    from . import superficies
+
+    if await superficies.visual_al_lado(ctx, titulo, html):  # con las analíticas abiertas, sale al costado del tablero
+        lugar = "en la pizarra que salió al lado del tablero de análisis"
+    elif donde == "ventana" and config.ES_WINDOWS:
+        from . import superficies
+
+        superficies.abrir_ventana(f"/visual/{superficies.guardar_visual(titulo[:80], html)}", 1180, 820)
+        lugar = "en una ventana grande en el PC"
+    elif not ctx.difundir:
         return "Aquí no hay pantalla donde mostrarlo."
-    await ctx.difundir({"type": "visual", "titulo": titulo[:80], "html": html})
-    return (f"Mostrando «{titulo}» en el lienzo. Si ya hablaste antes de dibujar, cierra con algo cortísimo "
-            "(«ahí se lo dejé en el panel») o nada nuevo; si no, di 1 o 2 frases con lo más importante. No leas el panel.")
+    else:
+        await ctx.difundir({"type": "visual", "titulo": titulo[:80], "html": html})
+        lugar = "en el lienzo"
+    return (f"Mostrando «{titulo}» {lugar}. Si todavía no lo explicaste en voz, hazlo ahora de verdad: si era una "
+            "explicación, 2 a 4 frases con la idea central y cómo funciona; si eran datos, 1 o 2 frases con lo importante. "
+            "Nada de «ya le explico»: explícalo. No leas el panel ni repitas lo que ya dijiste.")
 
 
 @herramienta("ocultar_visual", "Cierra el lienzo visual.")
@@ -545,6 +595,24 @@ async def ocultar_visual(ctx):
     if ctx.difundir:
         await ctx.difundir({"type": "visual", "cerrar": True})
     return "Lienzo cerrado."
+
+
+@herramienta("abrir_control_remoto", "Abre en el celular un panel con la pantalla del PC en vivo para tocarla y controlar el mouse. Úsala cuando el usuario pida control remoto, mouse remoto o controlar el computador desde el celular.")
+async def abrir_control_remoto(ctx):
+    if not config.ES_WINDOWS:
+        return "El control remoto solo está disponible cuando JARVIS corre en Windows."
+    if not ctx.difundir:
+        return "No hay una pantalla conectada para abrir el control remoto."
+    await ctx.difundir({"type": "control_remoto", "abrir": True})
+    return ("Listo: en el celular quedó la pantalla del PC en vivo. Tocar = clic, mantener presionado = clic derecho, "
+            "arrastrar con un dedo = arrastrar, dos dedos = rueda, botón ⌨ = teclado. Dilo en una frase corta.")
+
+
+@herramienta("cerrar_control_remoto", "Cierra el panel de control remoto del celular.")
+async def cerrar_control_remoto(ctx):
+    if ctx.difundir:
+        await ctx.difundir({"type": "control_remoto", "abrir": False})
+    return "Control remoto cerrado."
 
 
 @herramienta("estado_sistema", "Estado del computador: CPU, RAM, disco, batería, temperatura y procesos que más consumen.")
@@ -577,7 +645,8 @@ async def abrir(ctx, objetivo, donde=None, navegador=None):
     return await asyncio.to_thread(aperturas.abrir, objetivo, donde, navegador)
 
 
-@herramienta("poner_musica", "Pone música en Spotify. Sin petición elige algo según lo que el usuario suele escuchar; "
+@herramienta("poner_musica", "Pone música y la deja sonando (YouTube Music en su navegador o Spotify, según su preferencia). "
+             "Úsala siempre para música, nunca 'abrir' con una búsqueda. Sin petición elige algo según lo que el usuario suele escuchar; "
              "con petición busca y reproduce eso (canción, artista, lista, género o ánimo: 'algo para concentrarme').",
              {"peticion": P("string", "Qué poner (opcional)")}, solo_pc=True)
 async def poner_musica(ctx, peticion=None):
@@ -604,7 +673,8 @@ async def como_abro(ctx):
 TECLAS = {"play_pausa": 0xB3, "siguiente": 0xB0, "anterior": 0xB1, "detener": 0xB2, "silenciar": 0xAD, "bajar_volumen": 0xAE, "subir_volumen": 0xAF}
 
 
-@herramienta("multimedia", "Controla música/volumen del PC: play_pausa, siguiente, anterior, detener, silenciar, subir_volumen, bajar_volumen.",
+@herramienta("multimedia", "Controla música/volumen del PC: play_pausa, siguiente, anterior, detener, silenciar, subir_volumen, bajar_volumen. "
+             "Para dejar el volumen en un número exacto («a 20») usa volumen_pc.",
              {"accion": P("string", "Acción", list(TECLAS)), "veces": P("integer", "Repeticiones (para volumen, cada una ≈2%)")}, ["accion"], solo_pc=True)
 async def multimedia(ctx, accion, veces=1):
     import ctypes
@@ -867,12 +937,20 @@ async def estado_ia(ctx):
     return "\n".join(lineas)
 
 
-@herramienta("enviar_al_telefono", "Envía un mensaje al teléfono del usuario por Telegram.", {"mensaje": P("string", "Texto")}, ["mensaje"])
+@herramienta("enviar_al_telefono", "Manda YA una notificación al celular del usuario (le llega aunque tenga Maicol cerrado). "
+             "Para avisar más tarde, cuando pase algo en el PC, usa avisarme_cuando.", {"mensaje": P("string", "Texto del aviso")}, ["mensaje"])
 async def enviar_al_telefono(ctx, mensaje):
-    if not ctx.notificar:
-        return "Telegram no está configurado."
-    ok = await ctx.notificar(mensaje)
-    return "Enviado al teléfono." if ok else "No se pudo enviar (revisa TELEGRAM_TOKEN y TELEGRAM_USUARIOS)."
+    from . import avisos_push
+
+    llegó = []
+    if avisos_push.hay_suscritos() and await asyncio.to_thread(avisos_push.enviar, mensaje, "Maicol"):
+        llegó.append("notificación")
+    if ctx.notificar and await ctx.notificar(mensaje):
+        llegó.append("Telegram")
+    if llegó:
+        return f"Enviado al celular ({' y '.join(llegó)})."
+    return ("No le llegó: el celular todavía no tiene los avisos activados. Dígale que en el celular toque "
+            "⚙ → «🔔 Avisos en este celular» una vez (en iPhone, con Maicol agregado a la pantalla de inicio).")
 
 
 # ======================= archivos entre PC y celular =======================
@@ -1017,4 +1095,4 @@ async def guardar_en_pc(ctx, archivo=None, carpeta="Descargas"):
 
 
 # herramientas que viven en su propio módulo (se registran al importarlas)
-from . import claude_code, impresion3d, modos, notion  # noqa: E402,F401
+from . import analisis, claude_code, habilidades, impresion3d, modos, notion, vigilancias, voz  # noqa: E402,F401

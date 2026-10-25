@@ -8,7 +8,20 @@ import uvicorn
 from . import config
 
 
+def ya_corre() -> bool:
+    """¿Otro núcleo ya tiene el puerto? Entonces este no arranca (antes cargaba todo y fallaba al final)."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", config.PUERTO), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def main():
+    if ya_corre():
+        return
     archivo = logging.FileHandler(config.DATOS / "jarvis.log", encoding="utf-8")
     manejadores = [archivo]
     if sys.stdout is not None:  # con pythonw no hay consola

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#040a12">
+<title>Maicol · Análisis</title>
+<link rel="icon" href="/static/jarvis.png">
+<link rel="stylesheet" href="/static/tablero.css">
+</head>
+<body class="entrando">
+<!-- Tablero de análisis («Maicol, saca analíticas»): Maicol lo arma en vivo y usted también lo puede mover y editar -->
+<header class="cab">
+  <span class="reactor" aria-hidden="true"></span>
+  <div class="cab-txt">
+    <small>MAICOL · ANÁLISIS</small>
+    <b id="titulo">Tablero</b>
+  </div>
+  <span id="cuenta" class="cuenta"></span>
+  <span id="anotando" class="anotando oculto" title="El escriba está pasando lo nuevo al tablero">✎ anotando</span>
+  <div class="cab-bot">
+    <button id="ver-pizarra" class="oculto" title="Pizarra: las cuentas y tablas de Maicol">▤</button>
+    <select id="lista" title="Otros tableros"></select>
+    <button id="centrar" title="Ver todo (F)">⤢</button>
+    <button id="sonido" class="solo-ventana" title="Voz de Maicol en esta ventana">🔊</button>
+    <button id="cerrar" class="solo-ventana" title="Cerrar el tablero (queda guardado)">✕</button>
+  </div>
+</header>
+
+<main id="vista" class="vista">
+  <div id="mundo" class="mundo">
+    <svg id="lineas" class="lineas" width="1" height="1">
+      <defs><marker id="punta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+    </svg>
+    <div id="tarjetas"></div>
+  </div>
+  <div id="vacio" class="vacio oculto">
+    <div class="anillo"><span></span><span></span><span></span></div>
+    <h1>¿Qué desea analizar, señor?</h1>
+    <p>Cuénteme la idea, el negocio o lo que le da vueltas en la cabeza. Yo pregunto y vamos armando el esquema.</p>
+  </div>
+</main>
+
+<!-- la pizarra: mientras Maicol explica, aquí se ve la cuenta, la tabla o las cifras de lo que dice -->
+<aside id="pizarra" class="pizarra" aria-live="polite">
+  <header>
+    <div><small>PIZARRA</small><b id="piz-titulo"></b></div>
+    <span class="piz-nav"><button id="piz-ant" title="Anterior">‹</button><button id="piz-sig" title="Siguiente">›</button></span>
+    <button id="piz-cerrar" title="Cerrar la pizarra">✕</button>
+  </header>
+  <div id="piz-cuerpo" class="piz-cuerpo"></div>
+</aside>
+
+<footer class="pie">
+  <div class="maicol"><span id="estado" class="punto"></span><p id="voz">Listo.</p></div>
+  <form id="form" class="entrada">
+    <button type="button" id="mic" class="solo-ventana" title="Hablarle a Maicol">🎙</button>
+    <input id="texto" autocomplete="off" placeholder="Respóndale a Maicol…">
+    <button id="enviar" title="Enviar">➤</button>
+  </form>
+</footer>
+
+<div id="confirmar" class="modal oculto">
+  <div class="caja"><b>Maicol pide permiso</b><p id="confirmar-txt"></p>
+    <div><button id="confirmar-no">No</button><button id="confirmar-si" class="si">Sí, hágale</button></div></div>
+</div>
+
+<script src="/static/tablero.js"></script>
+</body>
+</html>

@@ -13,7 +13,8 @@ if not exist ".env" copy ".env.example" ".env" >nul
 
 curl -s -o nul -m 2 http://127.0.0.1:8765/api/ping
 if errorlevel 1 (
-  start "" /b ".venv\Scripts\pythonw.exe" -m jarvis
+  rem como administrador si está instalada la tarea (scripts\instalar_admin.ps1); si no, como siempre
+  schtasks /run /tn "Maicol Nucleo" >nul 2>nul || start "" /b ".venv\Scripts\pythonw.exe" -m jarvis
   for /l %%i in (1,1,60) do (
     timeout /t 1 /nobreak >nul
     curl -s -o nul -m 1 http://127.0.0.1:8765/api/ping && goto listo

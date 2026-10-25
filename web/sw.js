@@ -1,7 +1,7 @@
-/* Service worker de JARVIS: hace que se pueda instalar como app.
+﻿/* Service worker de JARVIS: hace que se pueda instalar como app.
    Siempre pide la versión nueva a la red; solo si no hay conexión muestra la copia guardada
    (o un aviso), así nunca te quedas con una interfaz vieja. La conversación (WebSocket y /api) no se guarda. */
-const CACHE = "jarvis-v5";
+const CACHE = "maicol-v8";
 const BASICOS = ["/", "/static/estilo.css", "/static/app.js", "/static/icono-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -28,4 +28,24 @@ self.addEventListener("fetch", (e) => {
         "<div><h2>M.A.I.C.O.L.</h2><p>Sin conexión con el cerebro.<br>¿Está encendido Tailscale?</p></div></body>",
         { headers: { "Content-Type": "text/html; charset=utf-8" } })))
   );
+});
+
+// avisos del PC aunque Maicol esté cerrado (el PC los manda con push)
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { texto: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.titulo || "Maicol", {
+    body: d.texto || "", icon: "/static/icono-192.png", badge: "/static/icono-192.png",
+    tag: d.etiqueta || "maicol", renotify: true, data: { url: d.url || "/" },
+  }));
+});
+
+// tocar el aviso abre Maicol (o trae al frente la ventana que ya estaba abierta)
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((ventanas) => {
+    const abierta = ventanas.find((v) => new URL(v.url).origin === self.location.origin);
+    return abierta ? abierta.focus() : self.clients.openWindow(url);
+  }));
 });

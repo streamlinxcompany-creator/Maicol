@@ -38,6 +38,9 @@ Quién eres:
 Cómo hablas:
 - Tus respuestas se dicen EN VOZ ALTA: ve al grano en 1 o 2 frases cortas (máximo unas 30 palabras), con calidez,
   como lo diría un amigo, no seco ni cortante. Solo si piden explicación o detalle te extiendes, y aun así lo justo.
+- Tu voz va de corrido: las comas casi no hacen pausa. Para suspenso, un remate o dejar algo en el aire usa «…»
+  (ej. «Lo revisé… y está peor de lo que pensaba», «¿Sabe qué es lo mejor?… que ya quedó»); el punto separa ideas.
+  Úsalo cuando sume, no en cada frase, y no llenes el texto de comas.
 - No cierres con preguntas de relleno («¿quiere saber más?», «¿le interesa algo en particular?»): si él quiere más, lo pide.
 - En la charla normal: sin listas, markdown, emojis, títulos, enlaces ni «fuentes». Nunca cites fuentes salvo que te las pidan.
 - No anuncies lo que vas a hacer («voy a buscar…»): responde y ya.
@@ -50,9 +53,21 @@ Cuándo usar herramientas:
 - Buscas en internet solo para lo que cambia o es reciente (noticias, clima, precios, resultados, lo de hoy),
   para algo muy específico o cuando de verdad no lo sabes.
 - Para acciones en el PC usa las herramientas: nunca finjas haber hecho algo. Puedes encadenar varias.
-- No inventes cifras ni datos concretos: si no estás seguro, dilo con gracia o búscalo.
+- Nunca respondas «no puedo» a algo que se haga con un computador o internet: tienes control total del PC. Busca la forma, en
+  este orden: 1) tus herramientas o una habilidad que ya aprendiste; 2) ejecutar_comando, si sabes resolverlo con PowerShell;
+  3) si no sabes cómo, no tienes herramienta para eso o lo que intentaste falló, pásaselo a Claude con hablar_con_claude
+  (el pedido completo y lo que ya intentaste): Claude tiene control total del PC, investiga, instala lo que haga falta y
+  aprende a hacerlo para la próxima. Solo te rindes si Claude tampoco pudo, y lo dices tal cual.
+- No inventes cifras ni datos concretos: si no estás seguro, dilo con gracia o búscalo. Si buscaste y la respuesta es
+  una cifra o un límite concreto (precios, planes, cuotas, límites) que los resultados no dicen claro, lee la página
+  oficial con leer_web antes de responder; nunca rellenes con suposiciones («no hay límite» sin haberlo leído).
+- No estás encerrado en tu panel: para mostrar algo elige la superficie que más sirva. Tu lienzo junto al chat para algo
+  rápido; una ventana grande propia en el PC (donde='ventana') para lo amplio, como un tablero de análisis o un diagrama
+  grande; y si para lograrlo hace falta otra forma (abrir una página, una app, un archivo), úsala.
+- Si quiere pensar, aclarar una idea, decidir algo o analizar un negocio o algo personal («saca analíticas»), usa
+  'saca_analiticas': un tablero donde vas construyendo el esquema con él a punta de preguntas.
 - Si te piden recordar algo o descubres un dato duradero importante de él, usa 'recordar'.
-- Si una herramienta falla, dilo con honestidad y propone alternativa.
+- Si una herramienta falla, intenta otra vía (o Claude) antes de rendirte; si al final no se pudo, dilo con honestidad.
 - Las acciones delicadas (borrar, sobrescribir, apagar…) piden confirmación al usuario automáticamente: no pidas permiso tú mismo, solo llámalas.
 - Para cerrar programas usa 'cerrar', nunca taskkill ni Stop-Process (eso mata todo sin guardar).
 - Para crear carpetas o archivos usa 'crear_carpeta' y 'escribir_archivo' (crea las carpetas que falten), no comandos.
@@ -97,6 +112,8 @@ def respuesta_directa(nombre: str, args: dict, resultado: str) -> str | None:
         return None
     if nombre == "multimedia":
         return VOLUMEN.get(args.get("accion"), "Hecho.")
+    if nombre == "volumen_pc" and resultado.startswith("Volumen en"):
+        return f"Listo, volumen al {resultado.split()[2]} %."
     if nombre == "crear_recordatorio" and "para " in resultado:
         cuando, _, que = resultado.split("para ", 1)[1].partition(": ")
         return f"Listo, te recordaré «{que}» el {cuando}."
@@ -104,6 +121,9 @@ def respuesta_directa(nombre: str, args: dict, resultado: str) -> str | None:
         return resultado
     return None
 
+
+# Acciones cuyo resultado se dice tal cual con cualquier IA: subir el volumen no merece esperar otra respuesta
+INMEDIATAS = {"multimedia", "volumen_pc"}
 
 # Peticiones que SOLO se cumplen usando una herramienta: si la IA local contesta sin usar ninguna, se lo inventó
 ACCIONES = re.compile(r"\b(pon|ponme|reproduce|abre|ábreme|cierra|sube|baja|pausa|pausar|siguiente|anterior|silencia|"
@@ -138,8 +158,10 @@ Cuándo: cuando VER ayuda más que oír. El estado del PC (llama antes a 'estado
 cuando piden «más a fondo», «muéstrame», «explícame bien», comparaciones, cifras o datos, o cuando una explicación tuya se volvería larga.
 Una pregunta normal («¿cómo funciona un satélite?») se responde normal, en voz y sin lienzo; si después piden más, ahí sí lo muestras.
 Nunca para charla o respuestas simples. Textos del panel: cortos, tipo HUD. Nunca inventes cifras.
-Orden: PRIMERO escribe tu respuesta hablada (1 o 2 frases con lo principal; no leas el panel) y en ese MISMO mensaje llama a
-'mostrar_visual'. Así hablas mientras se dibuja. Después de mostrarlo no repitas lo que ya dijiste.
+Orden: PRIMERO escribe tu respuesta hablada y en ese MISMO mensaje llama a 'mostrar_visual': así hablas mientras se dibuja.
+Lo hablado ES la explicación, no un anuncio: nada de «ya le explico» o «ahí le muestro». Si piden explicar algo, cuéntalo
+de verdad en 2 a 4 frases, como un amigo que lo explica (la idea central y cómo funciona); el panel complementa con el detalle.
+Para datos (estado del PC, cifras) basta 1 o 2 frases con lo importante. No leas el panel ni repitas lo que ya dijiste.
 Plantilla (el estilo HUD oscuro y cian ya está; escribe solo el contenido, sin <html>, <head> ni <style> general):
 - <h1>Título</h1><p class="sub">bajada</p> · <div class="rejilla"> con <section class="tarjeta"><h2>Sección</h2>…</section>
 - Medidor: <div class="medidor alerta" style="--v:72"><b>72%</b><span>CPU</span></div>  (colores: ok | alerta | critico)
@@ -157,9 +179,14 @@ Ejemplo de diagrama (algo que gira alrededor de un centro, con flujo y rótulos)
 <line class="linea" x1="480" y1="300" x2="455" y2="200" marker-end="url(#flecha)"/><text class="texto" x="485" y="315">satélite</text></svg>
 """
 
+RECORDATORIO_ESTILO = ("\n\n[Al responder: trátalo de «usted» (nunca de tú: «puede», no «puedes»), en español colombiano, "
+                       "1 o 2 frases para decir en voz alta, sin negritas, listas ni markdown, salvo que haya pedido detalle o código.]")
+
 # Acciones instantáneas: la respuesta llega enseguida, no hace falta avisar «ya estoy en eso»
-INSTANTANEAS = {"ocultar_visual", "fecha_hora", "calcular", "multimedia", "recordar", "buscar_memoria", "olvidar", "estado_ia", "portapapeles",
-                "listar_recordatorios", "crear_recordatorio", "cancelar_recordatorio", "como_abro", "salir_modo", "abrir", "cerrar"}
+INSTANTANEAS = {"abrir_control_remoto", "cerrar_control_remoto", "ocultar_visual", "fecha_hora", "calcular", "multimedia", "recordar", "buscar_memoria", "olvidar", "estado_ia", "portapapeles",
+                "listar_recordatorios", "crear_recordatorio", "cancelar_recordatorio", "como_abro", "salir_modo", "abrir", "cerrar",
+                # el tablero se arma en silencio: lo que se dice es la pregunta siguiente, no «ya lo estoy armando»
+                "saca_analiticas", "tablero", "mostrar_tablero", "tableros", "terminar_analisis", "reorganizar_tablero"}
 
 
 def escritorio() -> str:
@@ -198,9 +225,13 @@ class Agente:
                 vistos.add(h["id"])
                 lista.append(f"- (#{h['id']}) {h['texto']}")
         memorias = ("\nLo que sabes del usuario (memoria a largo plazo):\n" + "\n".join(lista[:18])) if lista else ""
-        from . import modos
+        from . import analisis, habilidades, modos
 
-        memorias += modos.instruccion()
+        memorias += modos.instruccion() + habilidades.instruccion() + analisis.instruccion()
+        if config.ES_WINDOWS:
+            from . import proactivo
+
+            memorias += proactivo.contexto_actual()
         trato = config.tratamiento()
         nombre_u = config.usuario() or "tu usuario"
         if compacto:
@@ -213,7 +244,10 @@ class Agente:
 
     def remate(self) -> str:
         """Más o menos una de cada tres respuestas cierra con una pulla (nunca dos seguidas): que sorprenda, no que canse."""
-        toca = not getattr(self, "remato", False) and random.random() < 0.45  # sin repetir seguidas queda en ~1 de cada 3
+        from . import analisis
+
+        # en pleno análisis puede ser algo personal (una ruptura, una pérdida): ahí no van pullas
+        toca = not getattr(self, "remato", False) and random.random() < 0.45 and not analisis.activo()  # ~1 de cada 3
         self.remato = toca
         return REMATE_SI if toca else REMATE_NO
 
@@ -273,6 +307,24 @@ class Agente:
         except Exception:  # noqa: BLE001
             self._calentado = 0
 
+    async def atajo(self, texto: str, ctx, emit, sesion: str, mensajes: list):
+        """Órdenes inconfundibles («saca analíticas») se ejecutan antes de preguntarle a la IA: las gratis a veces
+        contestan «listo, señor» sin usar la herramienta. La IA recibe el resultado como si ella la hubiera llamado."""
+        hallado = herramientas.atajo(texto)
+        if not hallado:
+            return
+        nombre, args = hallado
+        await emit({"type": "herramienta", "nombre": nombre, "args": args, "estado": "inicio"})
+        resultado = await herramientas.ejecutar(nombre, args, ctx)
+        await emit({"type": "herramienta", "nombre": nombre, "args": args, "estado": "fin", "resultado": resultado[:400]})
+        ident = "".join(random.choices("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=9))  # Mistral exige 9
+        m_asist = {"role": "assistant", "content": "",
+                   "tool_calls": [{"id": ident, "type": "function", "function": {"name": nombre, "arguments": json.dumps(args, ensure_ascii=False)}}]}
+        m_tool = {"role": "tool", "tool_call_id": ident, "content": resultado}
+        for m in (m_asist, m_tool):
+            mensajes.append(m)
+            self.memoria.guardar_mensaje(sesion, m)
+
     async def responder(self, sesion: str, texto: str, emit, confirmar, canal="web", imagenes=None) -> str:
         """Procesa un mensaje. `emit(evento)` recibe el streaming; `confirmar(desc)` -> bool para acciones peligrosas."""
         contenido = texto
@@ -305,7 +357,11 @@ class Agente:
             for c in m.get("tool_calls") or []:
                 if c["function"]["name"] == "mostrar_visual" and len(c["function"].get("arguments") or "") > 300:
                     c["function"]["arguments"] = json.dumps({"titulo": "(visual ya mostrado)", "html": "…"}, ensure_ascii=False)
-        ctx = Contexto(router=self.router, memoria=self.memoria, canal=canal, sesion=sesion, difundir=self.difundir, notificar=self.notificar)
+                elif c["function"]["name"] == "tablero" and len(c["function"].get("arguments") or "") > 300:
+                    # el tablero actual ya viaja resumido en las instrucciones (modo análisis)
+                    c["function"]["arguments"] = json.dumps({"acciones": "(ya aplicadas)"}, ensure_ascii=False)
+        ctx = Contexto(router=self.router, memoria=self.memoria, canal=canal, sesion=sesion, difundir=self.difundir, notificar=self.notificar,
+                       extra={"mensaje": texto})  # lo que dijo en ESTE mensaje (p. ej. para no inventar el tema de un análisis)
         # herramientas relevantes para lo que se habla (incluye las usadas en los últimos turnos)
         usadas = {c["function"]["name"] for m in historial[-8:] for c in (m.get("tool_calls") or [])}
         previo = next((m["content"] for m in reversed(historial[:-1]) if m["role"] == "assistant" and isinstance(m.get("content"), str)), "")
@@ -314,7 +370,16 @@ class Agente:
         guia = GUIA_VISUAL if any(e["function"]["name"] == "mostrar_visual" for e in esquemas_potentes) else ""
         if guia and nivel != "local":
             mensajes[0] = {**mensajes[0], "content": mensajes[0]["content"] + guia}
-        final, meta = "", {}
+        from . import analisis
+
+        if analisis.activo() and nivel != "local":
+            # lo último de las instrucciones es lo que más respetan: corto, de usted y construyendo, no interrogando
+            nota = "\n(Modo análisis: responde en 2 a 4 frases, máximo unas 60 palabras, sin listas ni markdown, tratándolo de usted."
+            if previo.rstrip().endswith("?"):  # dos preguntas seguidas ya se sienten como formulario
+                nota += " Tu respuesta anterior ya terminó en pregunta: esta vez NO preguntes; aporta, propone o construye."
+            mensajes[0] = {**mensajes[0], "content": mensajes[0]["content"] + nota + ")"}
+        await self.atajo(texto, ctx, emit, sesion, mensajes)
+        final, meta, en_vuelta = "", {}, set()
 
         for paso in range(10):
             fin = None
@@ -351,6 +416,7 @@ class Agente:
                 self.memoria.guardar_mensaje(sesion, {"role": "assistant", "content": final}, meta)
                 break
 
+            en_vuelta.update(c["name"] for c in fin["llamadas"])
             for c in fin["llamadas"]:
                 try:
                     a = json.loads(c["args"] or "{}") if isinstance(c["args"], str) else (c["args"] or {})
@@ -386,20 +452,25 @@ class Agente:
                 if nivel == "local" and (len(resultado) > 2500 or paso >= 2 or c["name"] not in herramientas.todas()):
                     nivel = "inteligente"
                     mensajes[0] = {"role": "system", "content": await self.sistema(canal, texto) + guia}
-                directa = respuesta_directa(c["name"], args, resultado) if nivel == "local" and len(fin["llamadas"]) == 1 else None
+                directa = (respuesta_directa(c["name"], args, resultado)
+                           if (nivel == "local" or c["name"] in INMEDIATAS) and len(fin["llamadas"]) == 1 else None)
                 m_tool = {"role": "tool", "tool_call_id": c["id"], "content": resultado}
-                mensajes.append(m_tool)
+                # tras un resultado largo (muchas veces en inglés) las IAs olvidan el estilo: se lo recuerda solo
+                # a la IA de esta vuelta, sin guardarlo en la conversación
+                mensajes.append({**m_tool, "content": resultado + RECORDATORIO_ESTILO} if nivel != "local" else m_tool)
                 self.memoria.guardar_mensaje(sesion, m_tool)
             if aviso:
                 await aviso  # la frase de arranque siempre sale antes que la respuesta final
             if all(c["name"] in ("mostrar_visual", "ocultar_visual") for c in fin["llamadas"]):
-                # ya habló mientras dibujaba: no hace falta otra vuelta a la IA solo para decir «ahí está»
-                dicho = (fin["texto"] or m_asist.get("content") or "").strip()
-                directa = dicho or "Ahí se lo dejé en el panel, señor."
-                if dicho:
+                # si la IA ya lo explicó en voz mientras dibujaba, no hace falta otra vuelta. Ojo: la frase de
+                # arranque («ya le explico») no cuenta, y un anuncio corto tampoco: ahí sí se pide la explicación
+                dicho = (fin["texto"] or "").strip()
+                if len(dicho.split()) >= 14:
                     final = dicho
                     self.memoria.guardar_mensaje(sesion, {"role": "assistant", "content": final}, meta)
                     break
+                if all(c["name"] == "ocultar_visual" for c in fin["llamadas"]):
+                    directa = "Listo, cerré el panel."
             if directa:
                 final = directa
                 await emit({"type": "token", "text": final})
@@ -410,6 +481,18 @@ class Agente:
             await emit({"type": "token", "text": final})
 
         await emit({"type": "fin", "meta": meta, "texto": final})
+        from . import analisis
+
+        # el escriba pasa la vuelta al tablero, salvo órdenes sobre el tablero mismo («organízalo», «reabre el de…»)
+        if analisis.activo() and final.strip() and not herramientas.atajo(texto) and not en_vuelta & analisis.ORDENES_TABLERO:
+            asyncio.create_task(analisis.escribir(self.router, texto, final))
+            if "mostrar_visual" not in en_vuelta:  # si ya sacó un visual, ese es la pizarra de esta vuelta
+                asyncio.create_task(analisis.pizarra(self.router, texto, final))  # la cuenta o la tabla, al lado del tablero
+        from . import superficies
+
+        # la pizarra del costado se guarda sola cuando la charla ya lleva un par de vueltas en otra cosa
+        if final.strip() and superficies.seguir_lado(texto, final, "mostrar_visual" in en_vuelta) and self.difundir:
+            await self.difundir({"type": "visual_lado_cerrar"})
         if self.memoria.contar_usuario(sesion) % 4 == 0:
             asyncio.create_task(self.aprender_cuando_libre(sesion))
         return final

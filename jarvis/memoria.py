@@ -75,6 +75,13 @@ class Memoria:
     def borrar_sesion(self, sesion):
         self._q("DELETE FROM mensajes WHERE sesion=?", (sesion,), commit=True)
 
+    def borrar_entre(self, sesion, ratos: list[tuple[float, float]]) -> int:
+        """Borra de la conversación lo dicho en esos ratos (un análisis que él pidió olvidar). Devuelve cuántos."""
+        total = 0
+        for desde, hasta in ratos:
+            total += self._q("DELETE FROM mensajes WHERE sesion=? AND ts BETWEEN ? AND ?", (sesion, desde, hasta), commit=True).rowcount
+        return total
+
     def contar_usuario(self, sesion) -> int:
         return self._q("SELECT COUNT(*) FROM mensajes WHERE sesion=? AND rol='user'", (sesion,)).fetchone()[0]
 

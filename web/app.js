@@ -45,6 +45,8 @@ const S = {
   ws: null, modo: "espera", info: null, ia: null,
   vozActiva: guardado("voz", true), sonidos: guardado("sonidos", true),
   voz: guardado("vozId", null), velocidad: guardado("velocidad", 20),
+  // en el celular no existen las voces de Edge: con esto habla con la del teléfono (al instante) en vez de esperar al PC
+  vozRapida: guardado("vozRapida", /iPhone|iPad|Android/i.test(navigator.userAgent)),
   generando: false, burbuja: null, textoActual: "", ptrVoz: 0, enCodigo: false,
   ultimoProveedor: null, adjuntos: [], confirmacion: null, provActual: null,
   hud: guardado("hud", false),
@@ -52,10 +54,41 @@ const S = {
   silenciarPC: guardado("silenciarPC", true), porVoz: false,
 };
 
+/* ---- puente con la ventana del tablero (web/tablero.js): es el mismo Maicol, no otro ----
+   El tablero no tiene voz propia: lo que usted le dice allá llega aquí, Maicol lo responde con su voz de siempre (y
+   con su manejo de la música), y allá se ve lo que va diciendo y su estado. Las dos ventanas son del mismo Edge,
+   así que se hablan directo (BroadcastChannel). Si hay varias pantallas de Maicol, el tablero elige una. */
+const PUENTE = { canal: "BroadcastChannel" in window ? new BroadcastChannel("maicol") : null, id: Math.random().toString(36).slice(2) };
+function alPuente(m) { if (PUENTE.canal) try { PUENTE.canal.postMessage({ ...m, de: PUENTE.id }); } catch { /* ventana cerrándose */ } }
+if (PUENTE.canal) PUENTE.canal.onmessage = (e) => {
+  const m = e.data || {};
+  if (m.tipo === "hola") return alPuente({ tipo: "aqui", lateral: LATERAL, modo: S.modo });
+  if (m.a !== PUENTE.id) return;  // le habla a otra pantalla
+  if (m.tipo === "decir") enviar(m.texto, !!m.porVoz);
+  else if (m.tipo === "permiso") responderConfirmacion(!!m.ok);
+  else if (m.tipo === "callar") callar();
+};
+
 /* ====================== audio ====================== */
 let actx = null, analizador = null, datosFreq = null;
 const reproductor = new Audio();
 reproductor.crossOrigin = "anonymous";
+
+// iOS solo deja sonar un <audio> si alguna vez arrancó dentro de un toque: con el primero se «desbloquea»
+let audioDesbloqueado = false;
+function desbloquearAudio() {
+  if (audioDesbloqueado || !reproductor.paused) return;  // si está sonando ya está desbloqueado (y no se corta)
+  audioDesbloqueado = true;
+  const silencio = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  const antes = reproductor.src;
+  reproductor.src = silencio;
+  reproductor.play().then(() => { reproductor.pause(); if (antes) reproductor.src = antes; }).catch(() => { audioDesbloqueado = false; });
+  if ("speechSynthesis" in window && !speechSynthesis.speaking) {
+    const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u);
+  }
+}
+addEventListener("pointerdown", desbloquearAudio, { capture: true });
+addEventListener("keydown", desbloquearAudio, { capture: true });
 
 function iniciarAudio() {
   if (actx) return;
@@ -86,6 +119,8 @@ const sonido = {
 
 /* ---- cola de voz: se habla frase a frase mientras llega el texto ---- */
 const colaVoz = [];
+// lo que se va diciendo, tal cual (con sus cifras): el tablero de análisis lo sigue con la cámara (ver alPuente «diciendo»)
+const colaFrases = [];
 let hablando = false;
 
 function limpiarParaVoz(t) {
@@ -102,7 +137,19 @@ function vozNavegador() {
   if (!m) return null;
   const sinTildes = (s) => s.normalize("NFD").replace(/\p{M}/gu, "");
   const nombre = "Microsoft " + m[2].replace("Multilingual", " Multilingual") + " ";
-  return speechSynthesis.getVoices().find((v) => v.lang === m[1] && sinTildes(v.name).startsWith(nombre)) || null;
+  const voces = speechSynthesis.getVoices();
+  return voces.find((v) => v.lang === m[1] && sinTildes(v.name).startsWith(nombre)) || (S.vozRapida ? vozDelDispositivo(voces) : null);
+}
+
+// La mejor voz en español del propio teléfono: masculina y «mejorada/premium» si está descargada
+function vozDelDispositivo(voces) {
+  const es = voces.filter((v) => /^es[-_]/i.test(v.lang));
+  if (!es.length) return null;
+  const hombres = /jorge|juan|diego|carlos|andr[eé]s|pablo|ra[uú]l|enrique|alvaro|álvaro/i;
+  const buena = /premium|enhanced|mejorad|neural|natural/i;
+  const puntos = (v) => (buena.test(v.name + " " + v.voiceURI) ? 4 : 0) + (hombres.test(v.name) ? 2 : 0)
+    + (/es[-_](MX|US|CO|419)/i.test(v.lang) ? 1 : 0) + (v.localService ? 1 : 0);
+  return es.sort((a, b) => puntos(b) - puntos(a))[0];
 }
 
 // Edge carga la lista de voces en segundo plano: hasta que llega, se espera (máx. 1,5 s) para no
@@ -113,7 +160,7 @@ const vocesListas = new Promise((ok) => {
   setTimeout(ok, 1500);
 });
 
-function hablarNavegador(t, voz, volumen = 1) {
+function hablarNavegador(t, voz, volumen = 1, alAvanzar = null) {
   return new Promise((ok) => {
     const u = new SpeechSynthesisUtterance(t);
     u.voice = voz;
@@ -126,7 +173,7 @@ function hablarNavegador(t, voz, volumen = 1) {
     // la voz de Edge no pasa por el analizador de audio: el orbe late con cada palabra que dice
     if (volumen) {
       u.onstart = () => { vozNativa = true; pulsoVoz = 1; };
-      u.onboundary = () => { pulsoVoz = 1; };
+      u.onboundary = (e) => { pulsoVoz = 1; if (alAvanzar) alAvanzar(e.charIndex || 0); };
     }
     u.onend = () => { if (volumen) vozNativa = false; ok(true); };
     u.onerror = (e) => { if (volumen) vozNativa = false; ok(e.error === "interrupted" || e.error === "canceled"); };
@@ -134,10 +181,51 @@ function hablarNavegador(t, voz, volumen = 1) {
   });
 }
 
+// lo que se lee en voz alta: «;», «:», guiones y paréntesis se vuelven comas (pausa corta y natural, no un corte),
+// y fuera los espacios raros y los emojis que algunas IAs meten y la voz lee a trompicones
+function pulirVoz(t) {
+  t = t.replace(/[   ​]/g, " ").replace(/\p{Extended_Pictographic}️?/gu, "")
+    .replace(/\s*[;:]\s+/g, ", ").replace(/\s+[—–-]\s+/g, ", ").replace(/\s*\(([^)]*)\)/g, ", $1,")
+    .replace(/\.{3,}/g, "…").replace(/(\s*,\s*)+(?!\d)/g, ", ").replace(/,\s*([.!?])/g, "$1").replace(/^[,\s]+|[,\s]+$/g, "")
+    .replace(/\s+/g, " ").trim();
+  return fluir(pronunciar(t));
+}
+
+// cómo suena (igual que jarvis/voz.py): palabras que la voz lee mal («DJ» -> «diyei») y texto corrido sin signos,
+// para que no haga pausas ni cambie el tono a cada coma. En pantalla el texto queda con todos sus signos.
+let reglasVoz = [];
+function cargarPronunciacion() {
+  fetch("/api/pronunciacion").then((r) => r.json()).then((d) => {
+    const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    reglasVoz = Object.keys(d).sort((a, b) => b.length - a.length).map((palabra) => {
+      const sigla = palabra === palabra.toUpperCase() && /\p{L}/u.test(palabra);  // las siglas solo en MAYÚSCULAS
+      return [new RegExp(`(?<![\\p{L}\\p{N}_])${escapar(palabra)}(?![\\p{L}\\p{N}_])`, sigla ? "gu" : "giu"), d[palabra]];
+    });
+  }).catch(() => {});
+}
+cargarPronunciacion();
+
+function pronunciar(t) {
+  for (const [re, dicho] of reglasVoz) t = t.replace(re, dicho);
+  return t.replace(/%/g, " por ciento").replace(/ & /g, " y ");
+}
+
+// sin pausas ni cambios de tono a cada coma, pero con las que suman: el punto entre frases (respirar), «…»
+// (suspenso) y la coma antes de un giro («…, pero»). Los números no se tocan: «3,5» y «1.000» siguen enteros
+const GIROS = /,\s+(?=(?:pero|aunque|sino|eso s[ií]|o sea|as[ií] que|mientras que)(?![\p{L}\p{N}_]))/giu;
+function fluir(t) {
+  return t.replace(/[¿¡«»"“”]/g, "").replace(/(?<=[\p{L}\p{N}])'(?=\s|$)/gu, "")
+    .replace(GIROS, "\u0000").replace(/[,;:]+(?=\s|$)/g, "")
+    .replace(/[.!?]+(?=\s+\S)/g, ".").replace(/(?<![.…])[.!?]+$/, "")
+    .replace(/\u0000/g, ", ").replace(/\s+/g, " ").trim();
+}
+
 function decir(texto) {
-  const t = limpiarParaVoz(texto);
+  // los números en palabras (web/numeros.js): «1.4 k» se dice «mil cuatrocientos», no cifra por cifra
+  const t = pulirVoz(limpiarParaVoz(window.numerosEnPalabras ? numerosEnPalabras(texto) : texto));
   if (!t || !S.vozActiva) return;
   colaVoz.push(vocesListas.then(() => (vozNavegador() ? { nativa: t } : audioNucleo(t))));
+  colaFrases.push(limpiarParaVoz(texto));
   revisarSilencio();  // pausa la música mientras se genera el audio, antes de que empiece a sonar
   if (!hablando) reproducirCola();
 }
@@ -153,14 +241,18 @@ async function reproducirCola() {
   hablando = true;
   while (colaVoz.length) {
     let item = await colaVoz.shift();
+    const original = colaFrases.shift() || "";
     if (!hablando) break;
+    alPuente({ tipo: "diciendo", texto: original });
     if (item && item.nativa) {
       // una frase a la vez: si la voz de Edge falla en una (p. ej. un corte de red), esa misma frase
       // se pide al núcleo con la misma voz, sin adelantarse ni pisarse con la siguiente
       poner("hablando");
       const voz = vozNavegador();
       // «synthesis-failed» suele ser pasajero (p. ej. justo tras cancelar): un reintento sale al instante
-      if (voz && ((await hablarNavegador(item.nativa, voz)) || !hablando || (await hablarNavegador(item.nativa, voz)) || !hablando)) continue;
+      // con cada palabra, por dónde va (0 a 1): el tablero sabe de qué frase, y de qué tarjeta, está hablando
+      const avance = (i) => alPuente({ tipo: "diciendo_pos", r: i / Math.max(1, item.nativa.length) });
+      if (voz && ((await hablarNavegador(item.nativa, voz, 1, avance)) || !hablando || (await hablarNavegador(item.nativa, voz, 1, avance)) || !hablando)) continue;
       item = await audioNucleo(item.nativa);
     }
     poner("hablando");
@@ -176,13 +268,16 @@ async function reproducirCola() {
     }
   }
   hablando = false;
+  alPuente({ tipo: "diciendo_fin" });
   if (S.modo === "hablando") poner(S.generando ? "pensando" : "espera");
   revisarSilencio();
 }
 
 function callar() {
   colaVoz.length = 0;
+  colaFrases.length = 0;
   hablando = false;
+  alPuente({ tipo: "diciendo_fin" });
   reproductor.pause();
   // cancelar sin nada sonando hace fallar la siguiente frase en Edge («synthesis-failed»)
   if ("speechSynthesis" in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
@@ -202,7 +297,7 @@ function navegadorJarvis() {
 }
 function necesitaSilencio() {
   if (!S.silenciarPC) return false;
-  return hablando || colaVoz.length > 0 || S.modo === "escuchando" || escucha.directo || escucha.esperandoComando || (S.generando && S.porVoz && S.vozActiva);
+  return hablando || colaVoz.length > 0 || S.modo === "escuchando" || escucha.directo || escucha.esperandoComando || escucha.oyendo || (S.generando && S.porVoz && S.vozActiva);
 }
 let ultimoCalentado = 0;
 function precalentar() {
@@ -242,10 +337,14 @@ function alimentarVoz(final = false) {
   if (S.enCodigo) return;
   const iCod = resto.indexOf("```");
   let zona = iCod >= 0 ? resto.slice(0, iCod) : resto;
+  // se corta solo al final de una frase: la primera sale rápido (para empezar a hablar ya) y las siguientes en
+  // trozos largos. Cada trozo es una locución aparte y entre una y otra la voz hace pausa y reinicia la entonación:
+  // cortar en cada «:» o «;» la dejaba entrecortada
   let corte = -1;
-  const re = /[.!?…:;](\s|$)|\n/g;
+  const re = /[.!?…](\s|$)|\n\n/g;
+  const minimo = S.ptrVoz === 0 ? 40 : 220;
   let m;
-  while ((m = re.exec(zona))) { if (m.index + 1 >= 20 || final) corte = m.index + 1; }
+  while ((m = re.exec(zona))) { if (m.index + 1 >= minimo || final) corte = m.index + 1; }
   if (final) corte = zona.length;
   if (corte > 0) {
     decir(zona.slice(0, corte));
@@ -444,6 +543,7 @@ function poner(modo, texto) {
   if (modo === "escuchando") precalentar();
   pintarPildora();
   revisarSilencio();
+  alPuente({ tipo: "modo", modo });
 }
 
 /* ---- modo limpio: píldora de estado, cajón y pantalla de inicio ---- */
@@ -536,6 +636,20 @@ async function mostrarVisual(ev) {
     '<svg width="0" height="0" style="position:absolute"><defs><marker id="flecha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#00e5ff"/></marker></defs></svg>' +
     `<main class="lienzo-contenido">${ev.html || ""}</main></body></html>`;
   S.ultimoVisual = ev;
+  $("#lienzo-tablero").classList.add("oculto");
+  $("#lienzo-marco").classList.remove("oculto");
+  document.body.classList.add("con-lienzo");
+  $("#lienzo").setAttribute("aria-hidden", "false");
+  if (LATERAL) avisarLienzo(ANCHO_LIENZO_LATERAL);
+}
+
+// un tablero de análisis en el lienzo: es una página de Maicol (se actualiza sola en vivo), no HTML de la IA
+function mostrarTablero(ev) {
+  const marco = $("#lienzo-tablero"), url = `/tablero?id=${encodeURIComponent(ev.id)}&incrustado=1`;
+  if (marco.getAttribute("src") !== url) marco.setAttribute("src", url);
+  $("#lienzo-titulo").textContent = ev.titulo || "Análisis";
+  $("#lienzo-marco").classList.add("oculto");
+  marco.classList.remove("oculto");
   document.body.classList.add("con-lienzo");
   $("#lienzo").setAttribute("aria-hidden", "false");
   if (LATERAL) avisarLienzo(ANCHO_LIENZO_LATERAL);
@@ -545,6 +659,19 @@ function cerrarVisual() {
   document.body.classList.remove("con-lienzo");
   $("#lienzo").setAttribute("aria-hidden", "true");
   if (LATERAL) avisarLienzo(0);
+}
+
+// en el panel lateral los enlaces se abren en el navegador de siempre (el Edge del panel no tiene tus sesiones
+// y sus ventanas nuevas saldrían fuera de la pantalla)
+if (LATERAL) {
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href^='http']");
+    if (!a) return;
+    e.preventDefault();
+    fetch("/api/abrir_enlace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: a.href }) })
+      .then((r) => { if (r.ok) aviso("ENLACE", "Abierto en tu navegador"); else window.open(a.href, "_blank"); })
+      .catch(() => window.open(a.href, "_blank"));
+  }, true);
 }
 
 function avisarLienzo(ancho) {  // el lanzador del lateral ensancha o encoge la ventana
@@ -589,6 +716,652 @@ function conectar() {
 
 function enviarWS(o) { if (S.ws && S.ws.readyState === 1) { S.ws.send(JSON.stringify(o)); return true; } return false; }
 
+/* ---- control remoto: la pantalla del PC en vivo en el celular ----
+   Dos formas de manejarla: touchpad (deslizas y el cursor se mueve, como en un portátil: preciso aunque la
+   pantalla se vea pequeña) o toque directo (tocas donde quieres hacer clic). En las dos: pellizcar = zoom. */
+const ES_REMOTO = !["127.0.0.1", "localhost", "::1"].includes(location.hostname);
+const RC = {
+  ws: null, url: null, derecho: false, zoom: 1, foco: [0.5, 0.5], cursor: [0.5, 0.5],
+  touchpad: guardado("touchpad", true), hd: guardado("controlHd", false),
+  dedos: new Map(), gesto: null, ultimoToque: 0, ultimoMov: 0, pend: [0, 0], envio: null, despierto: null, vozT: null,
+};
+const AYUDA_CONTROL = {
+  touchpad: "Desliza: mover el cursor · Toca: clic · Doble toque: doble clic<br>Toca y desliza enseguida: arrastrar · Mantén o toca con 2 dedos: clic derecho<br>2 dedos: rueda · Pellizca: zoom (la vista sigue al cursor)",
+  directo: "Toca donde quieras hacer clic · Mantén: clic derecho · Arrastra: arrastrar<br>2 dedos: rueda (con zoom: mover la vista) · Pellizca: zoom",
+};
+const limitar = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+
+function abrirControl() {
+  if (!ES_REMOTO) { aviso("CONTROL REMOTO", "Esto se usa desde el celular: pídeselo a Maicol desde allá."); return; }
+  if (RC.ws) return;
+  $("#control-remoto").classList.remove("oculto");
+  pintarControl(); mostrarAyudaControl();
+  // la pantalla del celular no se apaga mientras manejas el PC
+  navigator.wakeLock?.request("screen").then((w) => { RC.despierto = w; }).catch(() => {});
+  const ws = RC.ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/control");
+  ws.binaryType = "blob";
+  const pedir = () => {
+    if (ws.readyState !== 1) return;
+    const ahorro = navigator.connection?.saveData;
+    ws.send(JSON.stringify({ t: "cuadro", calidad: ahorro ? 35 : RC.hd ? 70 : 55, nitidez: RC.hd && !ahorro ? "hd" : "normal" }));
+  };
+  ws.onopen = pedir;
+  ws.onmessage = (e) => {
+    if (typeof e.data === "string") {
+      const m = JSON.parse(e.data);
+      if (m.t === "cursor" && !RC.pend[0] && !RC.pend[1]) RC.cursor = [m.x, m.y];
+      return;
+    }
+    const anterior = RC.url;
+    RC.url = URL.createObjectURL(e.data);
+    const img = $("#control-imagen");
+    img.onload = () => { if (anterior) URL.revokeObjectURL(anterior); ajustarControl(); pedir(); };  // el siguiente, recién mostrado este
+    img.src = RC.url;
+  };
+  ws.onclose = () => { if (RC.ws === ws) { RC.ws = null; soltarDespierto(); $("#control-remoto").classList.add("oculto"); aviso("CONTROL REMOTO", "Desconectado del PC"); } };
+}
+
+function cerrarControl() {
+  const ws = RC.ws; RC.ws = null;
+  if (ws) ws.close();
+  soltarDespierto();
+  $("#control-remoto").classList.add("oculto");
+  alternarEscribir(false);
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+function soltarDespierto() { RC.despierto?.release?.().catch(() => {}); RC.despierto = null; }
+
+function mostrarAyudaControl() {
+  const a = $("#control-ayuda");
+  a.innerHTML = AYUDA_CONTROL[RC.touchpad ? "touchpad" : "directo"];
+  a.classList.remove("fuera");
+  clearTimeout(mostrarAyudaControl.t);
+  mostrarAyudaControl.t = setTimeout(() => a.classList.add("fuera"), 6000);
+}
+
+function pintarControl() {
+  const modo = $("[data-c=modo]");
+  modo.querySelector("i").textContent = RC.touchpad ? "🖱" : "👆";
+  modo.querySelector("span").textContent = RC.touchpad ? "Touchpad" : "Directo";
+  $("[data-c=hd]").classList.toggle("activo", RC.hd);
+  $("#control-zona").classList.toggle("touchpad", RC.touchpad);
+}
+
+// la imagen se dibuja a la medida exacta que cabe (sin bordes): así cada toque cae justo en su punto del PC
+function ajustarControl() {
+  const img = $("#control-imagen"), zona = $("#control-zona");
+  if (!img.naturalWidth) return;
+  const k = Math.min(zona.clientWidth / img.naturalWidth, zona.clientHeight / img.naturalHeight);
+  img.style.width = Math.floor(img.naturalWidth * k) + "px";
+  img.style.height = Math.floor(img.naturalHeight * k) + "px";
+  const z = RC.zoom;
+  if (z <= 1.02) { RC.zoom = 1; img.style.transform = "none"; return; }
+  if (RC.touchpad) {  // en touchpad la vista acompaña al cursor: nunca se sale del cuadro
+    const m = 0.36 / z;
+    for (const i of [0, 1]) {
+      if (RC.cursor[i] < RC.foco[i] - m) RC.foco[i] = RC.cursor[i] + m;
+      if (RC.cursor[i] > RC.foco[i] + m) RC.foco[i] = RC.cursor[i] - m;
+    }
+  }
+  RC.foco = RC.foco.map((f) => limitar(f, 0.5 / z, 1 - 0.5 / z));
+  const [fx, fy] = RC.foco;
+  img.style.transform = `translate(${img.offsetWidth * (0.5 - fx * z)}px, ${img.offsetHeight * (0.5 - fy * z)}px) scale(${z})`;
+}
+addEventListener("resize", () => { if (RC.ws) setTimeout(ajustarControl, 60); });
+
+function puntoPC(x, y) {  // coordenadas de la pantalla del celular -> 0..1 de la pantalla del PC
+  const r = $("#control-imagen").getBoundingClientRect();
+  return [limitar((x - r.left) / r.width), limitar((y - r.top) / r.height)];
+}
+function mandarControl(m) { if (RC.ws && RC.ws.readyState === 1) RC.ws.send(JSON.stringify(m)); }
+function marcarToque(x, y, derecho) {
+  const z = $("#control-zona"), r = z.getBoundingClientRect(), d = document.createElement("div");
+  d.className = "control-toque" + (derecho ? " derecho" : ""); d.style.left = x - r.left + "px"; d.style.top = y - r.top + "px";
+  z.appendChild(d); setTimeout(() => d.remove(), 500);
+}
+
+// touchpad: los movimientos se juntan y salen cada 25 ms (con aceleración: lento = preciso, rápido = cruza la pantalla)
+function moverRelativo(dx, dy, dt) {
+  const r = $("#control-imagen").getBoundingClientRect();
+  if (!r.width) return;
+  const rapidez = Math.hypot(dx, dy) / Math.max(dt, 8);
+  const k = 1.3 * (1 + Math.min(2.2, rapidez * 1.4));
+  RC.pend[0] += (dx / r.width) * k; RC.pend[1] += (dy / r.height) * k;
+  if (!RC.envio) RC.envio = setTimeout(vaciarMovimiento, 25);
+}
+function vaciarMovimiento() {
+  clearTimeout(RC.envio); RC.envio = null;
+  const [dx, dy] = RC.pend; RC.pend = [0, 0];
+  if (!dx && !dy) return;
+  mandarControl({ t: "rel", dx, dy });
+  RC.cursor = [limitar(RC.cursor[0] + dx), limitar(RC.cursor[1] + dy)];  // el PC lo confirma con el próximo cuadro
+  if (RC.zoom > 1) ajustarControl();
+}
+function clicTouchpad(boton = "izquierdo", donde) {
+  vaciarMovimiento();
+  mandarControl({ t: "clic", boton });
+  const r = $("#control-imagen").getBoundingClientRect();
+  marcarToque(donde ? donde[0] : r.left + RC.cursor[0] * r.width, donde ? donde[1] : r.top + RC.cursor[1] * r.height, boton === "derecho");
+  navigator.vibrate?.(boton === "derecho" ? 30 : 8);
+}
+
+(() => {
+  const zona = $("#control-zona");
+  const centro = () => { const p = [...RC.dedos.values()]; return [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2]; };
+  const distancia = () => { const p = [...RC.dedos.values()]; return Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]); };
+
+  zona.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try { zona.setPointerCapture(e.pointerId); } catch { /* algunos navegadores no capturan el segundo dedo */ }
+    RC.dedos.set(e.pointerId, [e.clientX, e.clientY]);
+    if (RC.dedos.size === 2) {  // segundo dedo: rueda, zoom o clic derecho (si venía arrastrando, primero suelta)
+      const g = RC.gesto;
+      clearTimeout(g?.largo);
+      if (g?.tipo === "arrastre") { vaciarMovimiento(); mandarControl(RC.touchpad ? { t: "subir" } : { t: "subir", ...xy(puntoPC(g.x, g.y)) }); }
+      const [cx, cy] = centro();
+      RC.gesto = { tipo: "dos", d0: distancia(), z0: RC.zoom, y: cy, x: cx, t: Date.now(), movido: false, pellizco: false };
+      if (RC.zoom === 1 && !RC.touchpad) RC.foco = puntoPC(cx, cy);
+      return;
+    }
+    if (RC.dedos.size > 2) return;
+    const ahora = Date.now();
+    const g = RC.gesto = { tipo: "toque", x: e.clientX, y: e.clientY, px: e.clientX, py: e.clientY, t: ahora, tm: ahora,
+      arrastrable: RC.touchpad && ahora - RC.ultimoToque < 300 };
+    g.largo = setTimeout(() => {  // mantener presionado = clic derecho
+      if (RC.gesto !== g || g.tipo !== "toque") return;
+      g.tipo = "hecho";
+      if (RC.touchpad) clicTouchpad("derecho", [g.x, g.y]);
+      else { mandarControl({ t: "clic", ...xy(puntoPC(g.x, g.y)), boton: "derecho" }); marcarToque(g.x, g.y, true); navigator.vibrate?.(30); }
+    }, 550);
+  });
+
+  zona.addEventListener("pointermove", (e) => {
+    if (!RC.dedos.has(e.pointerId)) return;
+    RC.dedos.set(e.pointerId, [e.clientX, e.clientY]);
+    const g = RC.gesto; if (!g) return;
+    if (g.tipo === "dos" && RC.dedos.size === 2) {
+      const d = distancia(), [cx, cy] = centro();
+      if (!g.pellizco && Math.abs(d - g.d0) > 28) { g.pellizco = true; g.movido = true; }
+      if (g.pellizco) { RC.zoom = limitar(g.z0 * d / g.d0, 1, 4); ajustarControl(); return; }
+      const dy = cy - g.y, dx = cx - g.x;
+      if (!RC.touchpad && RC.zoom > 1) {  // toque directo con zoom: dos dedos mueven la vista
+        const r = $("#control-imagen").getBoundingClientRect();
+        RC.foco = [RC.foco[0] - dx / r.width, RC.foco[1] - dy / r.height]; g.x = cx; g.y = cy; g.movido = true;
+        ajustarControl(); return;
+      }
+      if (Math.abs(dy) >= 10) {
+        g.movido = true;
+        mandarControl({ t: "rueda", ...(RC.touchpad ? {} : xy(puntoPC(cx, cy))), cantidad: Math.round(dy * 6) });
+        g.y = cy;
+      }
+      return;
+    }
+    if (g.tipo === "toque" && Math.hypot(e.clientX - g.x, e.clientY - g.y) > 8) {  // empezó a moverse
+      clearTimeout(g.largo);
+      if (RC.touchpad) {
+        g.tipo = g.arrastrable ? "arrastre" : "mover";
+        if (g.arrastrable) { vaciarMovimiento(); mandarControl({ t: "bajar" }); navigator.vibrate?.(15); }
+      } else {
+        g.tipo = "arrastre"; mandarControl({ t: "bajar", ...xy(puntoPC(g.x, g.y)) });
+      }
+    }
+    if (RC.touchpad && (g.tipo === "mover" || g.tipo === "arrastre")) {
+      const ahora = Date.now();
+      moverRelativo(e.clientX - g.px, e.clientY - g.py, ahora - g.tm);
+      g.px = e.clientX; g.py = e.clientY; g.tm = ahora;
+    } else if (g.tipo === "arrastre" && Date.now() - RC.ultimoMov > 40) {
+      RC.ultimoMov = Date.now();
+      mandarControl({ t: "mover", ...xy(puntoPC(e.clientX, e.clientY)) });
+    }
+  });
+
+  const soltar = (e) => {
+    if (!RC.dedos.has(e.pointerId)) return;
+    RC.dedos.delete(e.pointerId);
+    const g = RC.gesto; if (!g) return;
+    if (g.tipo === "dos") {
+      // toque rápido con dos dedos (sin moverlos) = clic derecho
+      if (!RC.dedos.size) {
+        if (!g.movido && Date.now() - g.t < 350) {
+          if (RC.touchpad) clicTouchpad("derecho", [g.x, g.y]);
+          else { mandarControl({ t: "clic", ...xy(puntoPC(g.x, g.y)), boton: "derecho" }); marcarToque(g.x, g.y, true); }
+        }
+        RC.gesto = null;
+      }
+      return;
+    }
+    if (RC.dedos.size) return;
+    clearTimeout(g.largo); RC.gesto = null;
+    if (RC.touchpad) {
+      if (g.tipo === "arrastre") { vaciarMovimiento(); mandarControl({ t: "subir" }); }
+      else if (g.tipo === "toque") { clicTouchpad(); RC.ultimoToque = Date.now(); }
+      else vaciarMovimiento();
+      return;
+    }
+    const punto = xy(puntoPC(e.clientX, e.clientY));
+    if (g.tipo === "arrastre") mandarControl({ t: "subir", ...punto });
+    else if (g.tipo === "toque") {
+      const derecho = RC.derecho; RC.derecho = false; $("[data-c=derecho]").classList.remove("activo");
+      mandarControl({ t: "clic", ...xy(puntoPC(g.x, g.y)), boton: derecho ? "derecho" : "izquierdo" }); marcarToque(g.x, g.y, derecho);
+    }
+  };
+  zona.addEventListener("pointerup", soltar);
+  zona.addEventListener("pointercancel", soltar);
+  function xy([x, y]) { return { x, y }; }
+
+  // barra de arriba y dock de abajo
+  $("#control-remoto").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-c]"); if (!b) return;
+    const c = b.dataset.c;
+    if (c === "cerrar") cerrarControl();
+    else if (c === "teclado") alternarEscribir();
+    else if (c === "modo") { RC.touchpad = !RC.touchpad; guardar("touchpad", RC.touchpad); pintarControl(); mostrarAyudaControl(); ajustarControl(); }
+    else if (c === "hd") { RC.hd = !RC.hd; guardar("controlHd", RC.hd); pintarControl(); aviso("CONTROL REMOTO", RC.hd ? "Más nitidez (gasta más datos)" : "Calidad normal"); }
+    else if (c === "completa") pantallaCompleta();
+    else if (c === "ayuda") mostrarAyudaControl();
+    else if (c === "derecho") { RC.derecho = !RC.derecho; b.classList.toggle("activo", RC.derecho); if (RC.touchpad) { RC.derecho = false; clicTouchpad("derecho"); } }
+    else if (c === "doble") { if (RC.touchpad) { vaciarMovimiento(); mandarControl({ t: "doble" }); } else aviso("CONTROL REMOTO", "Toca dos veces seguidas donde quieras el doble clic."); }
+    else if (c === "mas") { $(".control-teclas").classList.toggle("oculto"); b.classList.toggle("activo"); setTimeout(ajustarControl, 50); }
+    else if (c === "dictar") dictar({
+      boton: b,
+      alParcial: (t) => burbujaControl("🎤 " + t),
+      alFinal: (t) => {
+        const caja = $("#control-texto");
+        if (!$("#control-escribir").classList.contains("oculto") && RC.escritura === "frase") {  // con la caja abierta: queda ahí para revisarlo
+          caja.value = (caja.value.trim() ? caja.value.trimEnd() + " " : "") + t; caja.dispatchEvent(new Event("input"));
+          burbujaControl("🎤 Revísalo y toca Enviar", 2000); return;
+        }
+        mandarControl({ t: "texto", v: t }); burbujaControl("⌨ Escrito en el PC: " + t, 2500);
+      },
+    });
+    else if (c === "maicol") dictar({
+      boton: b,
+      alParcial: (t) => burbujaControl("◉ " + t),
+      alFinal: (t) => { burbujaControl("Tú: " + t); enviar(t, true); },
+    });
+  });
+  $(".control-teclas").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.t) mandarControl({ t: "tecla", v: b.dataset.t });
+    if (b.dataset.a) mandarControl({ t: "atajo", v: b.dataset.a });
+    if (b.dataset.t || b.dataset.a) navigator.vibrate?.(8);
+  });
+  // teclado del celular -> teclado del PC (tildes y ñ incluidas), viendo lo que escribes
+  const caja = $("#control-texto");
+  caja.addEventListener("input", () => {
+    if (RC.escritura === "vivo") cambioVivo();
+    caja.style.height = "auto"; caja.style.height = Math.min(caja.scrollHeight, 110) + "px";
+  });
+  caja.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    if (RC.escritura === "vivo") { mandarControl({ t: "tecla", v: "enter" }); limpiarCaja(); } else enviarCaja(true);
+  });
+  $("#ce-enviar").onclick = () => enviarCaja(false);
+  $("#control-escribir").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.m) { RC.escritura = b.dataset.m; guardar("controlEscritura", RC.escritura); limpiarCaja(); pintarEscribir(); caja.focus(); }
+    if (b.dataset.k === "listo") alternarEscribir(false);
+    if (b.dataset.t) { mandarControl({ t: "tecla", v: b.dataset.t }); navigator.vibrate?.(8); }
+    if (b.dataset.a) { mandarControl({ t: "atajo", v: b.dataset.a }); navigator.vibrate?.(8); }
+    if (b.dataset.t || b.dataset.a) caja.focus();  // el teclado del celular no se cierra al tocar un botón
+  });
+  // con el teclado del celular abierto, la vista se ajusta al espacio que queda (iPhone no lo hace solo)
+  const alto = () => {
+    const v = window.visualViewport, el = $("#control-remoto");
+    if (!v || !RC.ws) { el.style.height = el.style.top = ""; return; }
+    el.style.height = v.height + "px"; el.style.top = v.offsetTop + "px";
+    clearTimeout(alto.t); alto.t = setTimeout(ajustarControl, 80);
+  };
+  window.visualViewport?.addEventListener("resize", alto);
+  window.visualViewport?.addEventListener("scroll", alto);
+})();
+
+/* ---- escribir en el PC: «escribir y enviar» (revisas y lo mandas) o «en vivo» (cada letra va directo al PC) ---- */
+RC.escritura = guardado("controlEscritura", "frase");
+const CENTINELA = "​";  // en vivo: un carácter invisible al inicio para notar el ⌫ aunque la caja esté vacía
+let enviadoVivo = "";
+
+function alternarEscribir(abrir) {
+  const barra = $("#control-escribir");
+  abrir = abrir ?? barra.classList.contains("oculto");
+  barra.classList.toggle("oculto", !abrir);
+  $("#control-remoto").classList.toggle("escribiendo", abrir);
+  $("[data-c=teclado]").classList.toggle("activo", abrir);
+  if (abrir) { limpiarCaja(); pintarEscribir(); $("#control-texto").focus(); $("#control-ayuda").classList.add("fuera"); }
+  else $("#control-texto").blur();
+  setTimeout(ajustarControl, 120);
+}
+function pintarEscribir() {
+  const vivo = RC.escritura === "vivo";
+  document.querySelectorAll("#control-escribir [data-m]").forEach((b) => b.classList.toggle("activo", b.dataset.m === RC.escritura));
+  $("#ce-nota").textContent = vivo ? "cada letra va directo al PC" : "revísalo y toca Enviar";
+  $("#ce-enviar").classList.toggle("oculto", vivo);
+  $(".ce-enter").classList.toggle("oculto", vivo);
+  $("#control-texto").enterKeyHint = vivo ? "enter" : "send";
+}
+function limpiarCaja() {
+  const caja = $("#control-texto");
+  caja.value = RC.escritura === "vivo" ? CENTINELA : "";
+  enviadoVivo = "";
+  caja.style.height = "auto";
+}
+function mandarTexto(t) {  // los saltos de línea son Enter en el PC
+  t.split("\n").forEach((parte, i) => { if (i) mandarControl({ t: "tecla", v: "enter" }); if (parte) mandarControl({ t: "texto", v: parte }); });
+}
+function enviarCaja(desdeEnter) {
+  const caja = $("#control-texto"), t = caja.value;
+  if (!t.trim()) { if (desdeEnter) mandarControl({ t: "tecla", v: "enter" }); return; }
+  mandarTexto(t);
+  if (desdeEnter || $("#ce-con-enter").checked) mandarControl({ t: "tecla", v: "enter" });
+  burbujaControl("⌨ Enviado al PC: " + t.slice(0, 120), 2000);
+  navigator.vibrate?.(15);
+  limpiarCaja(); caja.focus();
+}
+// en vivo: se compara lo que hay en la caja con lo ya enviado; así también sirven el autocorrector y las sugerencias
+function cambioVivo() {
+  const caja = $("#control-texto");
+  let v = caja.value;
+  if (!v.startsWith(CENTINELA)) {  // borró el carácter invisible: era un ⌫ con la caja vacía
+    if (!v.replaceAll(CENTINELA, "") && !enviadoVivo) mandarControl({ t: "tecla", v: "borrar" });  // si borró todo de golpe, ya se borra abajo
+    v = CENTINELA + v.replaceAll(CENTINELA, "");
+    caja.value = v;
+  }
+  const nuevo = v.slice(1);
+  let i = 0;
+  while (i < enviadoVivo.length && i < nuevo.length && enviadoVivo[i] === nuevo[i]) i++;
+  for (let k = 0; k < enviadoVivo.length - i; k++) mandarControl({ t: "tecla", v: "borrar" });
+  if (nuevo.slice(i)) mandarTexto(nuevo.slice(i));
+  enviadoVivo = nuevo;
+  if (nuevo.includes("\n")) limpiarCaja();
+  else if (nuevo.length > 300) { enviadoVivo = nuevo.slice(-200); caja.value = CENTINELA + enviadoVivo; }
+}
+
+function pantallaCompleta() {
+  const el = $("#control-remoto");
+  if (document.fullscreenElement) { document.exitFullscreen?.().catch(() => {}); return; }
+  if (!el.requestFullscreen) { aviso("PANTALLA COMPLETA", "En iPhone: agrega Maicol a la pantalla de inicio (Compartir → Agregar a inicio) y se verá sin barras."); return; }
+  el.requestFullscreen().then(() => screen.orientation?.lock?.("landscape").catch(() => {})).catch(() => {});
+}
+
+// globo sobre la pantalla del PC: lo que dictas y lo que responde Maicol mientras manejas el PC
+function burbujaControl(texto, ms = 0) {
+  const b = $("#control-voz");
+  if (!b) return;
+  b.textContent = texto;
+  b.classList.remove("oculto");
+  clearTimeout(RC.vozT);
+  if (ms) RC.vozT = setTimeout(() => b.classList.add("oculto"), ms);
+}
+
+/* ---- dictado de una sola frase (control remoto, panel de Claude): no toca la escucha de «Maicol» ---- */
+const dictado = { rec: null, grabador: null };
+function dictar({ boton, alParcial, alFinal, alTerminar }) {
+  iniciarAudio();
+  if (dictado.rec) { dictado.rec.stop(); return; }
+  if (dictado.grabador?.state === "recording") { dictado.grabador.stop(); return; }
+  callar();
+  escucha.pausada = true; escucha.directo = false; escucha.parar();
+  const terminar = () => {
+    dictado.rec = null; boton?.classList.remove("activo");
+    escucha.pausada = false; escucha.pintar();
+    if (escucha.continua) setTimeout(() => escucha.iniciar(), 300);
+    alTerminar?.();
+  };
+  boton?.classList.add("activo"); sonido.escuchar(); navigator.vibrate?.(15);
+  if (!SR) {  // sin reconocimiento del navegador: graba y transcribe en el PC (Whisper)
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((flujo) => {
+      const trozos = [], g = dictado.grabador = new MediaRecorder(flujo);
+      g.ondataavailable = (e) => trozos.push(e.data);
+      g.onstop = async () => {
+        flujo.getTracks().forEach((t) => t.stop());
+        alParcial?.("Transcribiendo…");
+        const fd = new FormData(); fd.append("audio", new Blob(trozos, { type: "audio/webm" }), "voz.webm");
+        const r = await fetch("/api/stt", { method: "POST", body: fd }).then((x) => x.json()).catch(() => ({}));
+        dictado.grabador = null; terminar();
+        if (r.texto) alFinal(r.texto.trim()); else aviso("VOZ", r.error || "No pude transcribir.");
+      };
+      g.start(); alParcial?.("Te escucho… toca otra vez para terminar");
+    }).catch(() => { terminar(); aviso("MICRÓFONO", "No tengo acceso al micrófono."); });
+    return;
+  }
+  const r = dictado.rec = new SR();
+  r.lang = "es-CO"; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1;
+  let final = "";
+  r.onresult = (e) => {
+    let parcial = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript; else parcial += e.results[i][0].transcript;
+    }
+    alParcial?.((final + " " + parcial).trim() || "Te escucho…");
+  };
+  r.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") aviso("MICRÓFONO", "El navegador bloqueó el micrófono. Permítelo en la barra de direcciones."); };
+  r.onend = () => { terminar(); if (final.trim()) alFinal(final.trim()); };
+  alParcial?.("Te escucho…");
+  try { r.start(); } catch { terminar(); }
+}
+
+/* ---- panel de Claude Code: hablarle a Claude desde el celular (por voz o texto) y ver lo que hace ---- */
+const CL = { abierto: false, datos: null, elegida: null, abiertas: new Set(), hacer: guardado("claudeHacer", true), recarga: null, carpeta: null };
+const ESTADOS_CLAUDE = { "en cola": "En cola", trabajando: "Trabajando…", lista: "Lista", error: "No pudo", detenida: "Detenida" };
+
+function abrirClaude() {
+  CL.abierto = true;
+  $("#panel-claude").classList.remove("oculto");
+  $("#pc-hacer").checked = CL.hacer;
+  cargarClaude();
+}
+function cerrarClaude() { CL.abierto = false; $("#panel-claude").classList.add("oculto"); $("#pc-texto").blur(); }
+
+async function cargarClaude() {
+  const r = await fetch("/api/claude").then((x) => x.json()).catch(() => null);
+  if (!r) { avisoClaude("Sin conexión con Maicol."); return; }
+  CL.datos = r;
+  if (CL.elegida === null && r.tareas[0] && !CL.abiertas.size) CL.abiertas.add(r.tareas[0].id);
+  pintarClaude();
+}
+function claudeCambio() {  // llega por WebSocket mientras Claude trabaja
+  if (!CL.abierto) return;
+  clearTimeout(CL.recarga); CL.recarga = setTimeout(cargarClaude, 250);
+}
+
+/* ---- mientras Claude trabaja, Maicol acompaña sin cansar: solo lo que Claude mismo cuenta de su avance
+   (nunca cada archivo o comando), con pausas largas, y un «sigue en eso» de vez en cuando si va para largo ---- */
+const NARRA = { ultimo: 0, paso: null, dicho: null, vigilante: null, quietos: 0 };
+const PAUSA_NARRA = 45000;  // mínimo entre un comentario y otro
+const SIGUE_CLAUDE = ["Claude sigue en eso, señor.", "Todavía trabajando, señor, esto va largo.", "Ahí sigue Claude dándole."];
+
+function fraseClaude(paso) {  // solo lo que Claude dice (💬), su primera frase; los pasos técnicos no se narran
+  if (!paso.startsWith("💬")) return null;
+  const t = paso.slice(2).trim().replace(/RESUMEN:.*/s, "").split(/(?<=[.!?])\s/)[0].trim();
+  return t.length > 15 ? `Claude dice: ${t.slice(0, 160)}` : null;
+}
+function narrarClaude(ev) {
+  if (ev.estado !== "trabajando") { clearInterval(NARRA.vigilante); NARRA.vigilante = null; NARRA.paso = null; return; }
+  if (ev.paso && fraseClaude(ev.paso)) NARRA.paso = ev.paso;
+  if (!NARRA.vigilante) {
+    NARRA.ultimo = Date.now(); NARRA.dicho = null; NARRA.quietos = 0;
+    NARRA.vigilante = setInterval(tickNarracion, 5000);
+  }
+}
+function tickNarracion() {
+  // sin pisar a nadie: si Maicol está hablando o te está escuchando, espera al siguiente turno
+  if (hablando || colaVoz.length || escucha.directo || escucha.esperandoComando || dictado.rec) return;
+  const pasado = Date.now() - NARRA.ultimo;
+  if (NARRA.paso && NARRA.paso !== NARRA.dicho && pasado > PAUSA_NARRA) {
+    NARRA.dicho = NARRA.paso;
+    decirNarracion(fraseClaude(NARRA.paso));
+  } else if (NARRA.quietos < SIGUE_CLAUDE.length && pasado > 75000 + NARRA.quietos * 60000) {  // va para largo y sin novedades
+    decirNarracion(SIGUE_CLAUDE[NARRA.quietos++]);
+  }
+}
+function decirNarracion(t) {
+  NARRA.ultimo = Date.now();
+  chip("✳ " + t, "claude");
+  if (!S.generando) subtitulo(t);
+  if (RC.ws) burbujaControl(t, 6000);
+  decir(t);
+}
+
+function avisoClaude(html, botones = []) {
+  const a = $("#pc-aviso");
+  if (!html) { a.classList.add("oculto"); return; }
+  a.innerHTML = html;
+  for (const [texto, fn] of botones) { const b = document.createElement("button"); b.textContent = texto; b.onclick = fn; a.appendChild(b); }
+  a.classList.remove("oculto");
+}
+
+function hace(seg) {
+  const s = Math.max(0, Date.now() / 1000 - seg);
+  if (s < 60) return "ahora"; if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`; return `hace ${Math.floor(s / 86400)} d`;
+}
+
+function pintarClaude() {
+  const r = CL.datos;
+  if (!r.instalado) avisoClaude("Claude Code no está instalado en el PC.");
+  else if (r.sesion === false) {
+    avisoClaude("<b>Claude no tiene la sesión iniciada en el PC.</b> Hay que hacerlo una sola vez: se abre una ventana en el PC para entrar con tu cuenta de Claude.", [
+      ["Iniciar sesión en el PC", async () => {
+        const x = await fetch("/api/claude_login", { method: "POST" }).then((y) => y.json()).catch(() => ({ error: "sin conexión" }));
+        if (x.error) { aviso("CLAUDE", x.error); return; }
+        avisoClaude("Listo: en el PC se abrió la ventana de inicio de sesión (y el navegador). Termínalo allí" + (ES_REMOTO ? " — puedes hacerlo desde aquí con «Manejar PC»." : ".") + " Luego toca «Ya inicié sesión».", [
+          ...(ES_REMOTO ? [["🖥 Manejar PC", () => { cerrarClaude(); abrirControl(); }]] : []),
+          ["Ya inicié sesión", cargarClaude],
+        ]);
+      }],
+    ]);
+  } else avisoClaude("");
+  $("#pc-estado").textContent = r.tareas.some((t) => t.estado === "trabajando") ? "TRABAJANDO" : r.sesion ? "LISTO" : "";
+
+  const lista = $("#pc-lista");
+  lista.innerHTML = "";
+  if (!r.tareas.length) lista.innerHTML = '<div class="pc-vacio">Aún no le has pedido nada a Claude.<br>Dicta o escribe abajo, por ejemplo:<br><i>«Revisa por qué Maicol tarda en responder en el celular»</i></div>';
+  for (const t of r.tareas) {
+    const abierta = CL.abiertas.has(t.id) || t.id === CL.elegida || t.estado === "trabajando";
+    const d = document.createElement("div");
+    d.className = `pc-tarea ${t.estado.replace(" ", "-")}${abierta ? " abierta" : ""}${t.id === CL.elegida ? " elegida" : ""}`;
+    const pasos = (t.pasos || []).slice(t.estado === "trabajando" ? -6 : -40);
+    d.innerHTML = `
+      <div class="pc-tarea-cab"><span class="pc-luz"></span><b>${escapar(t.titulo)}</b>
+        <small>${ESTADOS_CLAUDE[t.estado] || t.estado} · ${t.modo === "hacer" ? "✎ cambios" : "👁 solo lee"} · ${hace(t.creada)}</small></div>
+      <div class="pc-tarea-cuerpo">
+        <div class="pc-pedido">${escapar(t.pedido)}</div>
+        ${pasos.length ? `<details class="pc-pasos"${t.estado === "trabajando" ? " open" : ""}><summary>Lo que hizo (${(t.pasos || []).length})</summary>${pasos.map((p) => `<div>${escapar(p)}</div>`).join("")}</details>` : ""}
+        ${t.respuesta ? `<div class="pc-respuesta">${markdown(t.respuesta)}</div>` : t.estado === "trabajando" ? '<div class="pc-trabajando"><i></i><i></i><i></i></div>' : ""}
+        <div class="pc-acciones">
+          ${t.estado === "trabajando" ? '<button data-a="detener">■ Detener</button>' : '<button data-a="responder">↩ Responder</button>'}
+          ${t.respuesta && t.estado !== "trabajando" ? '<button data-a="escuchar">🔊 Escuchar</button>' : ""}
+        </div>
+      </div>`;
+    d.querySelector(".pc-tarea-cab").onclick = () => { if (CL.abiertas.has(t.id)) CL.abiertas.delete(t.id); else CL.abiertas.add(t.id); pintarClaude(); };
+    d.querySelector(".pc-acciones").onclick = async (e) => {
+      const a = e.target.closest("button")?.dataset.a;
+      if (a === "detener") { await fetch(`/api/claude/${t.id}/detener`, { method: "POST" }); cargarClaude(); }
+      if (a === "responder") { CL.elegida = t.id; pintarContextoClaude(); $("#pc-texto").focus(); pintarClaude(); }
+      if (a === "escuchar") decir((t.respuesta.match(/RESUMEN:\s*(.+)/) || [])[1] || limpiarParaVoz(t.respuesta).slice(0, 600));
+    };
+    lista.appendChild(d);
+  }
+  pintarContextoClaude();
+}
+
+function pintarContextoClaude() {
+  const t = (CL.datos?.tareas || []).find((x) => x.id === CL.elegida);
+  const c = $("#pc-contexto");
+  if (!t && CL.chat) {
+    c.innerHTML = `💬 Siguiendo tu chat «${escapar(CL.chat.titulo)}» `;
+    const x = document.createElement("button"); x.textContent = "✕"; x.onclick = () => { CL.chat = null; pintarContextoClaude(); };
+    c.appendChild(x);
+    return;
+  }
+  if (!t) {
+    CL.elegida = null;
+    c.innerHTML = `Conversación nueva · en <b>${escapar(CL.carpeta || "Maicol")}</b> `;
+    const x = document.createElement("button"); x.textContent = "cambiar carpeta"; x.onclick = elegirCarpetaClaude;
+    c.appendChild(x);
+    if ((CL.datos?.chats || []).length) {
+      const y = document.createElement("button"); y.textContent = "💬 seguir un chat tuyo"; y.onclick = elegirChatClaude;
+      c.appendChild(y);
+    }
+    return;
+  }
+  c.innerHTML = `↩ Siguiendo «${escapar(t.titulo.replace(/ \(seguimiento\)$/, ""))}» `;
+  const x = document.createElement("button"); x.textContent = "✕ nueva"; x.onclick = () => { CL.elegida = null; pintarClaude(); };
+  c.appendChild(x);
+}
+
+// carpetas: Maicol, las que ya usó Claude, u otra por nombre («smaky», «proyecto robot»…: el PC la busca)
+function elegirCarpetaClaude() {
+  const c = $("#pc-contexto");
+  const usadas = [...new Set((CL.datos?.tareas || []).map((t) => t.carpeta.split(/[\\/]/).pop()))].filter((n) => n && n !== "jarvis").slice(0, 4);
+  c.innerHTML = "Carpeta: ";
+  for (const n of ["Maicol", ...usadas, "Otra…"]) {
+    const b = document.createElement("button"); b.textContent = n;
+    b.onclick = () => {
+      if (n === "Otra…") { const v = prompt("¿En qué carpeta o proyecto? (basta el nombre, ej. «smaky»)"); if (!v) return; CL.carpeta = v.trim(); }
+      else CL.carpeta = n === "Maicol" ? null : n;
+      pintarContextoClaude();
+    };
+    c.appendChild(b);
+  }
+}
+
+// tus chats de la app de Claude: Claude sigue uno de ellos con todo lo que ya hablaron
+function elegirChatClaude() {
+  const c = $("#pc-contexto");
+  c.innerHTML = "";
+  c.classList.add("chats");
+  for (const ch of CL.datos.chats) {
+    const b = document.createElement("button");
+    b.innerHTML = `${escapar(ch.titulo)} <small>${escapar(ch.carpeta.split(/[\\/]/).pop())} · ${hace(ch.cuando)}</small>`;
+    b.onclick = () => { CL.chat = ch; CL.elegida = null; c.classList.remove("chats"); pintarClaude(); $("#pc-texto").focus(); };
+    c.appendChild(b);
+  }
+  const x = document.createElement("button"); x.textContent = "Cancelar";
+  x.onclick = () => { c.classList.remove("chats"); pintarContextoClaude(); };
+  c.appendChild(x);
+}
+
+async function enviarClaude() {
+  const caja = $("#pc-texto"), texto = caja.value.trim();
+  if (!texto) { caja.focus(); return; }
+  const b = $("#pc-enviar"); b.disabled = true;
+  const r = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texto, tarea: CL.elegida, hacer: CL.hacer, carpeta: CL.elegida ? null : CL.carpeta, chat: CL.elegida ? null : CL.chat?.id }) }).then((x) => x.json()).catch(() => ({ error: "Sin conexión con Maicol." }));
+  b.disabled = false;
+  if (r.error) { avisoClaude(escapar(r.error)); return; }
+  caja.value = ""; caja.style.height = "auto";
+  CL.elegida = r.tarea.id; CL.abiertas.add(r.tarea.id); CL.chat = null;
+  sonido.enviar(); navigator.vibrate?.(15);
+  cargarClaude();
+}
+
+(() => {
+  $("#pc-cerrar").onclick = cerrarClaude;
+  $("#pc-mic").innerHTML = ICONOS.mic;
+  $("#pc-enviar").innerHTML = ICONOS.enviar;
+  $("#pc-enviar").onclick = enviarClaude;
+  $("#pc-hacer").onchange = (e) => { CL.hacer = e.target.checked; guardar("claudeHacer", CL.hacer); };
+  const caja = $("#pc-texto");
+  caja.addEventListener("input", () => { caja.style.height = "auto"; caja.style.height = Math.min(caja.scrollHeight, 140) + "px"; });
+  caja.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !/Android|iPhone|iPad/i.test(navigator.userAgent)) { e.preventDefault(); enviarClaude(); } });
+  // dictar: el texto queda en la caja para revisarlo; «enviar» o decir «envíalo» al final lo manda solo
+  $("#pc-mic").onclick = () => {
+    const previo = caja.value.trim();
+    dictar({
+      boton: $("#pc-mic"),
+      alParcial: (t) => { caja.value = (previo ? previo + " " : "") + t; caja.dispatchEvent(new Event("input")); },
+      alFinal: (t) => {
+        const solo = /[,.]?\s*(env[ií]a(lo|selo)?|m[aá]nd(a|alo|aselo))[.!]?$/i;
+        caja.value = (previo ? previo + " " : "") + t.replace(solo, "");
+        caja.dispatchEvent(new Event("input"));
+        if (solo.test(t)) enviarClaude();
+      },
+    });
+  };
+})();
+
 let chipsHerramienta = {};
 function manejar(ev) {
   switch (ev.type) {
@@ -619,7 +1392,9 @@ function manejar(ev) {
       if (!S.burbuja) { S.burbuja = burbuja("assistant"); S.burbuja.classList.add("escribiendo"); }
       S.textoActual += ev.text;
       S.burbuja.querySelector(".cuerpo").innerHTML = markdown(S.textoActual);
+      alPuente({ tipo: "texto", texto: limpiarParaVoz(S.textoActual) });
       subtitulo(S.textoActual);
+      if (RC.ws) burbujaControl("◉ " + limpiarParaVoz(S.textoActual).slice(-240));
       alFondo();
       alimentarVoz(false);
       return;
@@ -648,6 +1423,7 @@ function manejar(ev) {
       S.generando = false; S.burbuja = null;
       botonEnviar();
       sonido.fin();
+      if (RC.ws && !$("#control-voz").classList.contains("oculto")) burbujaControl($("#control-voz").textContent, 8000);
       if (!hablando && !colaVoz.length) poner("espera");
       setTimeout(() => marcarActivo(null), 1500);
       if (escucha.continua) escucha.iniciar();
@@ -672,10 +1448,34 @@ function manejar(ev) {
         c.onclick = () => mostrarVisual(ev);
       }
       return;
+    case "pronunciacion": cargarPronunciacion(); return;  // le enseñaron cómo se dice una palabra
+    case "tablero_mostrar": {
+      mostrarTablero(ev);
+      const c = chip("◈ " + (ev.titulo || "Análisis") + " · ver", "visual");
+      c.onclick = () => mostrarTablero(ev);
+      return;
+    }
+    case "control_remoto":
+      if (ev.abrir) abrirControl(); else cerrarControl();
+      return;
+    case "claude":
+      narrarClaude(ev);
+      claudeCambio();
+      return;
+    case "panel_claude":
+      if (!LATERAL) abrirClaude();
+      return;
+    case "control_aviso":
+      if (ES_REMOTO) return;  // es para las pantallas del PC
+      aviso("CONTROL REMOTO", ev.texto, ev.activo);
+      if (ev.activo) decir(ev.texto);
+      return;
     case "anuncio":
       burbuja("assistant", ev.texto);
       subtitulo(ev.texto);
       decir(ev.texto);
+      if (RC.ws) burbujaControl(ev.texto, 10000);
+      if (ev.texto.startsWith("🤖")) claudeCambio();
       return;
     case "externo": {
       // conversación que ocurrió en otro dispositivo (p. ej. el celular): se muestra aquí en vivo
@@ -711,6 +1511,7 @@ function enviar(texto, porVoz = false) {
   if (S.generando) enviarWS({ type: "detener" });
   burbuja("user", texto, null, S.adjuntos);
   subtitulo(texto, true);
+  alPuente({ tipo: "usuario", texto });
   S.textoActual = ""; S.ptrVoz = 0; S.enCodigo = false; S.burbuja = null;
   if (!enviarWS({ type: "mensaje", texto, voz: porVoz, imagenes: S.adjuntos.length ? S.adjuntos : undefined })) {
     chip("✕ Sin conexión con el núcleo", "rot");
@@ -737,6 +1538,7 @@ function pedirConfirmacion(ev) {
   $("#modal-texto").textContent = `Maicol solicita permiso para ${nombres[ev.nombre] || ev.nombre}.`;
   $("#modal-args").textContent = Object.entries(ev.args || {}).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v, null, 1)}`).join("\n");
   $("#modal").classList.remove("oculto");
+  alPuente({ tipo: "permiso", texto: $("#modal-texto").textContent, args: $("#modal-args").textContent });
   decir("Necesito tu autorización para continuar.");
   poner("pensando", "ESPERANDO AUTORIZACIÓN");
 }
@@ -745,6 +1547,7 @@ function responderConfirmacion(ok) {
   enviarWS({ type: "confirmar", id: S.confirmacion, ok });
   S.confirmacion = null;
   $("#modal").classList.add("oculto");
+  alPuente({ tipo: "permiso_listo" });
   chip(ok ? "✓ Autorizado" : "✕ Denegado", ok ? "ok" : "rot");
 }
 
@@ -753,7 +1556,8 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 // «Maicol» lo transcriben de muchas formas; «Jarvis» sigue sirviendo por costumbre
 const PALABRA = /\b(maicol|maikol|maykol|maicoll|michael|maicool|maico|mycol|maikel|jarvis|yarvis|jarbis)\b[,.!]?\s*/i;
 const escucha = {
-  rec: null, activo: false, continua: guardado("continua", false), directo: false, esperandoComando: false, temporizador: null,
+  rec: null, activo: false, continua: guardado("continua", false), directo: false, esperandoComando: false, temporizador: null, pausada: false,
+  oyendo: false, parcial: "", cierre: null,
   grabador: null, trozos: [],
 
   crear() {
@@ -766,7 +1570,7 @@ const escucha = {
         if (!t) continue;
         if (!res.isFinal) {
           if (this.directo || this.esperandoComando) subtitulo(t, true);
-          else if (PALABRA.test(t) && hablando) callar(); // interrupción
+          else if (PALABRA.test(t)) this.oir(t);
           continue;
         }
         this.final(t);
@@ -774,7 +1578,7 @@ const escucha = {
     };
     r.onend = () => {
       this.activo = false;
-      if (this.continua || this.directo) setTimeout(() => this.iniciar(), 300);
+      if (!this.pausada && (this.continua || this.directo)) setTimeout(() => this.iniciar(), 300);
       this.pintar();
     };
     r.onerror = (e) => {
@@ -786,7 +1590,26 @@ const escucha = {
     this.rec = r;
   },
 
+  // dijo «Maicol» y sigue hablando: la música se pausa YA. Con ella de fondo el reconocimiento no nota que usted
+  // terminó de hablar y la orden llegaba varios segundos tarde. Si aun así el ruido no deja cerrar la frase, se toma
+  // lo entendido cuando deja de cambiar
+  oir(t) {
+    if (hablando) callar();  // interrupción
+    if (!this.oyendo) { this.oyendo = true; revisarSilencio(); }
+    this.parcial = t;
+    clearTimeout(this.cierre);
+    this.cierre = setTimeout(() => {
+      const ultimo = this.parcial;
+      this.oyendo = false; this.parcial = "";
+      if (!ultimo) return;
+      try { this.rec.abort(); } catch { /* */ }  // descarta el final que llegaría tarde (y repetido)
+      this.final(ultimo);
+    }, 1600);
+  },
+
   final(t) {
+    clearTimeout(this.cierre);
+    if (this.oyendo) { this.oyendo = false; this.parcial = ""; revisarSilencio(); }
     if (S.confirmacion) {
       if (/^(s[ií]|claro|adelante|hazlo|autorizo|autorizado|dale|ok|okay|confirmo)\b/i.test(t)) return responderConfirmacion(true);
       if (/^(no|cancela|deniega|negativo|det[eé]nte)\b/i.test(t)) return responderConfirmacion(false);
@@ -816,7 +1639,7 @@ const escucha = {
   terminarComando() { this.esperandoComando = false; clearTimeout(this.temporizador); },
 
   iniciar() {
-    if (!SR) return;
+    if (!SR || this.pausada) return;  // pausada: un dictado (control remoto, Claude) tiene el micrófono
     if (!this.rec) this.crear();
     if (this.activo) return;
     try { this.rec.start(); this.activo = true; } catch { /* ya iniciado */ }
@@ -1169,6 +1992,8 @@ function iniciarUI() {
   $("#btn-config").onclick = abrirAjustes;
   $("#cerrar-ajustes").onclick = () => $("#ajustes").classList.add("oculto");
   $("#chk-voz").onchange = (e) => { S.vozActiva = e.target.checked; guardar("voz", S.vozActiva); pintarBotonVoz(); };
+  $("#chk-voz-rapida").checked = S.vozRapida;
+  $("#chk-voz-rapida").onchange = (e) => { S.vozRapida = e.target.checked; guardar("vozRapida", S.vozRapida); decir("Así voy a sonar en este dispositivo."); };
   $("#chk-silenciar").checked = S.silenciarPC;
   $("#chk-silenciar").onchange = (e) => { S.silenciarPC = e.target.checked; guardar("silenciarPC", S.silenciarPC); revisarSilencio(); };
   $("#chk-ligero").checked = S.ligero;
@@ -1182,6 +2007,9 @@ function iniciarUI() {
   const nuevaConversacion = async () => { await fetch("/api/nueva_conversacion", { method: "POST" }); chat.innerHTML = ""; actualizarVacio(); subtitulo("Conversación nueva. La memoria a largo plazo se conserva."); };
   $("#btn-nueva").onclick = nuevaConversacion;
   $("#btn-nueva-sup").onclick = nuevaConversacion;
+  if (ES_REMOTO) { $("#btn-control").classList.remove("oculto"); $("#btn-control").onclick = () => { $("#ajustes").classList.add("oculto"); abrirControl(); }; }
+  $("#btn-abrir-claude").onclick = () => { $("#ajustes").classList.add("oculto"); abrirClaude(); };
+  if (ES_REMOTO && "serviceWorker" in navigator) { $("#btn-avisos").classList.remove("oculto"); $("#btn-avisos").onclick = activarAvisos; }
   $("#btn-celular").onclick = async () => {
     const caja = $("#qr-celular");
     caja.classList.remove("oculto");
@@ -1189,7 +2017,9 @@ function iniciarUI() {
     const r = await fetch("/api/qr_celular").then((x) => x.json()).catch(() => ({ error: "Sin respuesta" }));
     if (r.error) { caja.innerHTML = `<div class="vacio">${escapar(r.error)}</div>`; return; }
     caja.innerHTML = `<img src="data:image/png;base64,${r.png}" alt="QR para el celular">
-      <div class="vacio">Con Tailscale encendido en el celular, escanéalo con la cámara. Sirve una sola vez y vence en ${Math.round(r.vence_en / 60)} min.</div>`;
+      ${r.pin ? `<div class="pin-celular">${r.pin.slice(0, 3)} ${r.pin.slice(3)}</div>` : ""}
+      <div class="vacio">Con Tailscale encendido en el celular, escanea el QR o abre ${escapar(r.direccion || "")} y escribe el código.
+      En iPhone, la app agregada al inicio pide el código una vez. Sirve una sola vez y vence en ${Math.round(r.vence_en / 60)} min.</div>`;
   };
   $("#sel-local").onchange = async (e) => {
     await fetch("/api/llaves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ IA_LOCAL_MODO: e.target.value }) });
@@ -1205,7 +2035,7 @@ function iniciarUI() {
   }));
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.code === "Space") { e.preventDefault(); escucha.alternarDirecto(); }
-    if (e.key === "Escape") { callar(); alternarPanel(false); $("#ajustes").classList.add("oculto"); if (S.confirmacion) responderConfirmacion(false); }
+    if (e.key === "Escape") { callar(); alternarPanel(false); $("#ajustes").classList.add("oculto"); cerrarClaude(); if (S.confirmacion) responderConfirmacion(false); }
   });
 }
 
@@ -1250,6 +2080,32 @@ async function archivosCompartidos() {
   lista.slice(0, Math.max(1, +p.get("compartido") || 1)).reverse().forEach(tarjetaArchivo);
   aviso("ARCHIVO", "Recibido. Dime qué hago con él, por ejemplo «guárdalo en el escritorio del PC».");
   history.replaceState(null, "", "/");
+}
+
+/* ---- avisos en el celular aunque Maicol esté cerrado (push) ---- */
+async function activarAvisos() {
+  const iOS = /iPhone|iPad/i.test(navigator.userAgent);
+  if (!("PushManager" in window) || !("Notification" in window)) {
+    aviso("AVISOS", iOS ? "En iPhone primero agrega Maicol a la pantalla de inicio (Compartir → Agregar a inicio), ábrelo desde ahí y vuelve a tocar este botón."
+      : "Este navegador no permite avisos. Usa Chrome.", true);
+    return;
+  }
+  if (await Notification.requestPermission() !== "granted") {
+    aviso("AVISOS", "Sin permiso no puedo avisarte. Actívalo en los ajustes del navegador para este sitio.", true);
+    return;
+  }
+  try {
+    const { clave, error } = await fetch("/api/push/clave").then((r) => r.json());
+    if (error) throw new Error(error);
+    const binaria = Uint8Array.from(atob(clave.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((clave.length + 3) % 4)), (c) => c.charCodeAt(0));
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: binaria });
+    const r = await fetch("/api/push/suscribir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sub }) }).then((x) => x.json());
+    if (r.error) throw new Error(r.error);
+    aviso("AVISOS", r.prueba ? "Listo: te debió llegar un aviso de prueba." : "Quedó activado, pero el aviso de prueba no salió: revisa la conexión del PC.");
+  } catch (e) {
+    aviso("AVISOS", "No pude activarlos: " + e.message, true);
+  }
 }
 
 /* ---- app instalable (PWA) ---- */

@@ -8,7 +8,7 @@ import time
 
 import httpx
 
-from jarvis.router import Ranura, Router, _espera_de, clasificar
+from jarvis.router import Ranura, Router, _espera_de, clasificar, sin_sentido
 
 
 def sse(*trozos):
@@ -176,8 +176,19 @@ def prueba_esperas():
     print("✓ entiende los mensajes de límite de Groq, Gemini y OpenRouter")
 
 
+def prueba_sin_sentido():
+    # lo que soltó de verdad un modelo gratis desbocado en un ensayo del modo análisis
+    assert sin_sentido("En resumen, el modelitoיעבר feasibility con only delivery because que No arbeiten lieu divers irs, "
+                       "InteractiveLogicalнавливás birthssten Shan ताoperativeEsc tipos ádu ோเกี่ยวlections 殆Adjしても遇上了 هدفAFP всегда")
+    assert sin_sentido("El señor está diciendo que el horno de 6 bandejas rinde 12 pollos cada 45 minutos")
+    assert not sin_sentido("Con ese horno le da para unos 140 pollos al día, señor… así que el reto no es producir sino vender.")
+    assert not sin_sentido("Hola en japonés se escribe こんにちは y se pronuncia konnichiwa, señor, muy fácil de recordar.")
+    print("✓ detecta respuestas desbocadas (basura en mil idiomas o razonamiento interno) y deja pasar las normales")
+
+
 async def main():
     prueba_esperas()
+    prueba_sin_sentido()
     prueba_firmas_gemini()
     for p in (prueba_rota_en_429, prueba_cuota_diaria_por_llave, prueba_herramientas_en_streaming, prueba_llamadas_paralelas_gemini,
               prueba_sin_tools_usa_protocolo, prueba_corte_a_mitad, prueba_todos_agotados):
