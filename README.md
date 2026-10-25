@@ -151,6 +151,34 @@ Abre una terminal nueva, escribe `claude` e inicia sesión con tu cuenta. Despu�
 - Corre en segundo plano: sigues hablando con JARVIS y te avisa en tus pantallas cuando Claude termina.
 - «Dile a Claude que también…» sigue la misma conversación; «¿qué te respondió Claude?» muestra todo.
 
+### Como administrador (para tocar el arranque, discos, servicios…)
+
+Desde el celular nadie puede aceptar la ventana de permiso de Windows (UAC), así que lo que necesite
+administrador se quedaba trabado. Instálalo una vez (pide permiso esa única vez):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\instalar_admin.ps1
+```
+
+Crea la tarea programada «Maicol Nucleo»: el núcleo arranca al iniciar sesión con permisos de administrador, y lo que
+lanza (Claude Code, `ejecutar_comando`, habilidades) también. La pestaña lateral y las apps que Maicol abre siguen
+siendo de usuario normal. Lo delicado sigue pidiendo confirmación. Para volver atrás: el mismo comando con `-Quitar`.
+
+## «Maicol, saca analíticas»: pensar en voz alta
+
+Un tablero para aclarar una idea (la de LienzzonzoNZO, dentro de Maicol). Dile «saca analíticas» y te pregunta
+*«¿Qué desea analizar, señor?»*. Cuéntale un negocio, una decisión o algo personal: te hace una pregunta a la vez y
+con cada respuesta arma un esquema de tarjetas conectadas (problemas, ideas, emociones, evidencias, riesgos,
+hallazgos…) hasta llegar a una conclusión y los siguientes pasos. Cambia el tono según el tema (estratega para
+negocios; amigo empático, sin pullas, para lo personal).
+
+- Lo muestra donde mejor sirva: en el PC, una ventana grande propia; desde el celular, en el panel.
+  Todas las pantallas lo ven cambiar en vivo (`/tablero?id=…`).
+- Mueve tarjetas arrastrándolas, edítalas con doble clic, bórralas con ✕. Desde la ventana del tablero también
+  le puedes hablar (🎙) o escribir a Maicol.
+- Se guarda en `data/tableros/`: «muéstrame el análisis del café» lo retoma; «ya, terminemos» lo cierra.
+- Maicol no está atado a su panel: `mostrar_visual` también puede abrir lo que dibuja en una ventana propia.
+
 ## Modos
 
 «Jarvis, modo juego» → pone música para jugar y abre Steam, o el juego que pidas («modo juego, quiero jugar

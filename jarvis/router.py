@@ -26,6 +26,19 @@ ESTADO = config.DATOS / "router_estado.json"
 ETIQUETA = "herramienta"
 
 
+# Algunos modelos gratis se desbocan: sueltan su razonamiento interno o terminan escupiendo palabras de mil idiomas.
+_ALFABETOS_RAROS = re.compile(r"[Ѐ-ӿ֐-׿؀-ۿऀ-ॿ฀-๿぀-ヿ㐀-鿿가-힯]")
+_RAZONANDO = re.compile(r"\s*(el (señor|usuario) (está diciendo|dice|pregunta|quiere|pide)|necesito pensar|déjame pensar|"
+                        r"let me think|the user (is|wants|asks|said)|okay, so)", re.I)
+
+
+def sin_sentido(texto: str) -> bool:
+    """¿La respuesta se dañó? Mezcla de alfabetos (cirílico, chino, hebreo…) o arranca razonando en voz alta."""
+    if len(texto) >= 40 and _RAZONANDO.match(texto):
+        return True
+    return len(texto) >= 80 and len(_ALFABETOS_RAROS.findall(texto[-400:])) >= 8
+
+
 class ErrorProveedor(Exception):
     def __init__(self, tipo: str, detalle: str = "", espera: float | None = None):
         super().__init__(f"{tipo}: {detalle[:300]}")
@@ -446,6 +459,8 @@ class Router:
             duracion, motivo = 24 * 3600, "sin créditos gratis"
         elif e.tipo == "modelo":
             duracion, motivo = 24 * 3600, "modelo retirado"
+        elif e.tipo == "basura":
+            duracion, motivo = 6 * 3600, "respondió sin sentido"
         elif e.tipo == "sin_tools":
             r.tools = False
             r.fallos -= 1
@@ -485,9 +500,13 @@ class Router:
                 yield {"type": "reset"}
                 emitio = False
             try:
+                escrito = ""
                 async for ev in self._stream_ranura(r, mensajes, tools, vision):
                     if ev["type"] == "delta":
                         emitio = True
+                        escrito += ev["text"]
+                        if sin_sentido(escrito):  # se cortó a tiempo: otro modelo la rehace desde cero
+                            raise ErrorProveedor("basura", escrito[-160:])
                     yield ev
                 return
             except ErrorProveedor as e:

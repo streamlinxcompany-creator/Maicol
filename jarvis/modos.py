@@ -286,7 +286,9 @@ async def abrir_juego(ctx, nombre):
         next(iter(difflib.get_close_matches(clave, por_clave, n=1, cutoff=0.45)), None)
     if hallado:
         hallado = por_clave.get(hallado, hallado)
-        os.startfile(f"steam://rungameid/{juegos[hallado]}")  # noqa: S606 — URL de Steam, no un archivo
+        from .aperturas import iniciar
+
+        iniciar(f"steam://rungameid/{juegos[hallado]}")  # el juego no hereda el administrador del núcleo
         return f"Abriendo {hallado} en Steam."
     return await ejecutar("abrir", {"objetivo": nombre}, ctx)
 
